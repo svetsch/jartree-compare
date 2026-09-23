@@ -25,6 +25,10 @@ public final class GuiSnapshot {
             compare(args);
             return;
         }
+        if (args[0].equals("--launch")) {
+            launch(args.length > 1 ? new File(args[1]) : null);
+            return;
+        }
         if (args[0].equals("--tabs")) {
             tabs(args);
             return;
@@ -87,6 +91,30 @@ public final class GuiSnapshot {
         done.await();
         Platform.exit();
         System.out.println("wrote " + out.getAbsolutePath());
+    }
+
+    /**
+     * Starts the application through the real launcher (JarTreeGui.start), optionally writes a PNG of the
+     * window and exits. Fails when starting the application throws, which a directly built MainWindow misses.
+     */
+    private static void launch(File out) throws Exception {
+        new Thread(() -> {
+            try {
+                Thread.sleep(6000);
+            } catch (InterruptedException ignored) {
+            }
+            Platform.runLater(() -> {
+                Stage stage = (Stage) javafx.stage.Window.getWindows().stream()
+                        .filter(w -> w instanceof Stage).findFirst().orElse(null);
+                if (stage != null && out != null) {
+                    write(stage.getScene(), out);
+                }
+                System.out.println("window title: " + (stage == null ? "none" : stage.getTitle()));
+                Platform.exit();
+            });
+        }).start();
+        JarTreeGui.launchGui(new String[0]);
+        System.out.println("application started and closed cleanly");
     }
 
     /** Opens one tab per report and renders the window. Usage: --tabs OUT.png REPORT.json... */

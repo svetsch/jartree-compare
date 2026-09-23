@@ -36,7 +36,6 @@ public final class JarTreeGui extends Application {
         Settings settings = window.settings();
         Scene scene = new Scene(window, settings.getDouble("width", 1360), settings.getDouble("height", 860));
         scene.getStylesheets().add(JarTreeGui.class.getResource("app.css").toExternalForm());
-        stage.setTitle("jartree-compare");
         for (int size : new int[] {32, 64, 128, 256}) {
             stage.getIcons().add(new Image(JarTreeGui.class.getResourceAsStream("icon-" + size + ".png")));
         }

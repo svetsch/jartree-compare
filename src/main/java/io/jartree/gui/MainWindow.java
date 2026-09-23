@@ -14,6 +14,7 @@ import java.util.Optional;
 import javafx.application.HostServices;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
+import javafx.beans.value.ChangeListener;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
@@ -71,6 +72,9 @@ final class MainWindow extends BorderPane {
     private final List<String> log = new ArrayList<>();
     private final CheckMenuItem exportVisibleOnly = new CheckMenuItem("Export visible libraries only");
     private final List<MenuItem> resultActions = new ArrayList<>();
+    private final ChangeListener<String> titleListener = (obs, o, n) -> showTitle(n);
+    /** The pane whose title is currently shown in the window title. */
+    private ComparisonPane titled;
 
     MainWindow(Stage stage, HostServices hostServices) {
         this.stage = stage;
@@ -153,20 +157,29 @@ final class MainWindow extends BorderPane {
         resultInfo.textProperty().unbind();
         progress.progressProperty().unbind();
         progress.visibleProperty().unbind();
+        // the stage title follows the active tab; it is set, not bound, so that the caller can set it too
+        if (titled != null) {
+            titled.titleProperty().removeListener(titleListener);
+        }
+        titled = pane;
         if (pane == null) {
             statusMessage.setText("Ready");
             resultInfo.setText("");
             progress.setVisible(false);
-            stage.setTitle("jartree-compare");
+            showTitle(null);
         } else {
             statusMessage.textProperty().bind(pane.statusProperty());
             resultInfo.textProperty().bind(pane.infoProperty());
             progress.progressProperty().bind(pane.progressProperty());
             progress.visibleProperty().bind(pane.runningProperty());
-            stage.titleProperty().unbind();
-            stage.titleProperty().bind(pane.titleProperty().map(t -> "jartree-compare — " + t));
+            pane.titleProperty().addListener(titleListener);
+            showTitle(pane.titleProperty().get());
         }
         updateResultActions();
+    }
+
+    private void showTitle(String tabTitle) {
+        stage.setTitle(tabTitle == null ? "jartree-compare" : "jartree-compare — " + tabTitle);
     }
 
     private void updateResultActions() {
