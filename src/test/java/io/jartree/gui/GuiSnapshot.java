@@ -25,6 +25,10 @@ public final class GuiSnapshot {
             compare(args);
             return;
         }
+        if (args[0].equals("--about")) {
+            about(new File(args[1]));
+            return;
+        }
         Path report = Path.of(args[0]);
         File out = new File(args[1]);
         String select = args.length > 2 ? args[2] : "";
@@ -81,6 +85,37 @@ public final class GuiSnapshot {
                     done.countDown();
                 });
             }).start();
+        });
+        done.await();
+        Platform.exit();
+        System.out.println("wrote " + out.getAbsolutePath());
+    }
+
+    /** Renders the modal About dialog; it is found by title because it runs its own event loop. */
+    private static void about(File out) throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        Platform.startup(started::countDown);
+        started.await();
+        Platform.runLater(() -> {
+            Stage owner = new Stage();
+            owner.setScene(new Scene(new MainWindow(owner, null), 900, 600));
+            owner.getScene().getStylesheets().add(JarTreeGui.class.getResource("app.css").toExternalForm());
+            owner.show();
+            AboutDialog.show(owner, null);
+        });
+        Thread.sleep(2500);
+        CountDownLatch done = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            javafx.stage.Window dialog = javafx.stage.Window.getWindows().stream()
+                    .filter(w -> w instanceof Stage s && "About jartree-compare".equals(s.getTitle()))
+                    .findFirst().orElse(null);
+            if (dialog != null) {
+                write(dialog.getScene(), out);
+                ((Stage) dialog).close();
+            } else {
+                System.out.println("about dialog not found");
+            }
+            done.countDown();
         });
         done.await();
         Platform.exit();

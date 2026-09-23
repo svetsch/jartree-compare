@@ -115,6 +115,7 @@
                         <property>^git.branch$</property>
                         <property>^git.build.time$</property>
                         <property>^git.commit.id.abbrev$</property>
+                        <property>^git.commit.id$</property>
                         <property>^git.commit.id.full$</property>
                         <property>^git.commit.time$</property>
                         <property>^git.dirty$</property>

@@ -81,7 +81,7 @@ final class AboutDialog {
         stage.initOwner(owner);
         stage.initModality(Modality.APPLICATION_MODAL);
         stage.setTitle("About jartree-compare");
-        Scene scene = new Scene(box, 560, 330);
+        Scene scene = new Scene(box, 580, 390);
         if (owner != null && owner.getScene() != null) {
             scene.getStylesheets().addAll(owner.getScene().getStylesheets());
         }
