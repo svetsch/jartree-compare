@@ -37,22 +37,31 @@ public final class ResultReader {
             throw new IOException(file + " is not a jartree-compare JSON report");
         }
         try {
-            List<LibraryDiff> libraries = new ArrayList<>();
-            for (Object o : list(root.get("libraries"))) {
-                libraries.add(library(map(o)));
-            }
-            int oldCount = (int) number(root.get("oldLibraryCount"),
-                    libraries.stream().filter(l -> l.oldLib() != null).count());
-            int newCount = (int) number(root.get("newLibraryCount"),
-                    libraries.stream().filter(l -> l.newLib() != null).count());
-            return new ComparisonResult(Path.of(str(root.get("oldRoot"))), Path.of(str(root.get("newRoot"))),
-                    oldCount, newCount, libraries, strings(root.get("warnings")),
-                    root.get("started") == null ? Instant.EPOCH : Instant.parse(str(root.get("started"))),
-                    Duration.ofMillis(number(root.get("durationMillis"), 0)), limits(root.get("limits")),
-                    timings(root.get("timings"), number(root.get("durationMillis"), 0)));
+            return fromMap(root);
         } catch (RuntimeException e) {
             throw new IOException(file + ": unexpected report structure (" + e + ")", e);
         }
+    }
+
+    /**
+     * Reads a report already parsed with {@link JsonParser}, e.g. one embedded in another file.
+     *
+     * @throws RuntimeException when the structure is not that of a report
+     */
+    public static ComparisonResult fromMap(Map<?, ?> root) {
+        List<LibraryDiff> libraries = new ArrayList<>();
+        for (Object o : list(root.get("libraries"))) {
+            libraries.add(library(map(o)));
+        }
+        int oldCount = (int) number(root.get("oldLibraryCount"),
+                libraries.stream().filter(l -> l.oldLib() != null).count());
+        int newCount = (int) number(root.get("newLibraryCount"),
+                libraries.stream().filter(l -> l.newLib() != null).count());
+        return new ComparisonResult(Path.of(str(root.get("oldRoot"))), Path.of(str(root.get("newRoot"))),
+                oldCount, newCount, libraries, strings(root.get("warnings")),
+                root.get("started") == null ? Instant.EPOCH : Instant.parse(str(root.get("started"))),
+                Duration.ofMillis(number(root.get("durationMillis"), 0)), limits(root.get("limits")),
+                timings(root.get("timings"), number(root.get("durationMillis"), 0)));
     }
 
     private static LibraryDiff library(Map<?, ?> m) {

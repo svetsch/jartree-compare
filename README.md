@@ -83,7 +83,7 @@ jartree-compare [options] OLD NEW
 | `--fail-on-change` | Exit code 1 when libraries were added, removed or changed (for CI) |
 | `--no-cache` / `--cache-dir DIR` / `--clear-cache` | Control the cache (default `~/.jartree-compare/cache`) |
 | `-t, --threads N` | Worker threads |
-| `--gui [OLD NEW \| REPORT.json]` | Open the desktop interface |
+| `--gui [OLD NEW \| FILE.jtcompare \| REPORT.json]` | Open the desktop interface |
 
 Exit codes: `0` no differences (or `--fail-on-change` not set), `1` differences found with `--fail-on-change`,
 `2` error.
@@ -115,6 +115,7 @@ not decompiled. Use --max-classes 70 (or more) to decompile all of them.
 ```bash
 jartree-compare-gui.cmd                                      # or: java -jar target/jartree-compare.jar
 java -jar target/jartree-compare.jar --gui OLD NEW           # compare immediately
+java -jar target/jartree-compare.jar --gui release.jtcompare  # open a saved comparison
 java -jar target/jartree-compare.jar --gui report.json       # open a saved report
 ```
 
@@ -122,8 +123,13 @@ java -jar target/jartree-compare.jar --gui report.json       # open a saved repo
 result; the menu and the status bar always act on the active tab. Open a tab with the **+** next to the tabs or
 *File ▸ New comparison* (Ctrl+N), copy the current paths into a new tab with *File ▸ Duplicate comparison*, and
 close one with Ctrl+W. Comparisons in different tabs run at the same time (decompilation itself is serialized,
-so tabs queue for it). The tabs of the last session are reopened on start, with their paths but without
-results.
+so tabs queue for it). The tabs of the last session are reopened on start: a tab saved as a comparison file
+from that file (with its result, if it holds one), any other tab with its paths but without results.
+
+A tab is named after its paths: every comparison renames it after the compared paths as soon as it starts (a
+cancelled or failed one gives the previous name back). Saving does not rename the tab, and a reopened comparison
+file gets the name it had when it was saved; the tab's tooltip shows the file that Ctrl+S saves to. An opened
+JSON report names the tab after the report until the next comparison.
 
 ![Several comparisons in tabs](docs/images/gui-tabs.png)
 
@@ -136,14 +142,22 @@ the changed resources.
 | Column | Shows |
 |---|---|
 | Library / entry | Path, class name or member declaration |
+| Archive name | File name of the deepest archive the row belongs to: `nested-1.1.jar` for `app.war!/WEB-INF/lib/nested-1.1.jar` (empty for exploded directories) |
+| File name | File name of the deepest file the row stands for: the library's archive, a class's `Calc.class`, the class file a member is declared in (`Calc$Helper.class`), or a resource's `app.properties` |
 | Status | `changed`, `rebuilt`, `added`, `removed`, `error`; for classes `modified`, `debug info`, `same source`; for members what changed (`body`, `modifiers`, `constant`, `lambda`) |
 | Version | Library version change, or a class file version change |
 | Lines | `+added −removed` for the row (library totals, class diff, lines inside a member, resource diff) |
 | Changes | Number of classes and resources, or members of a class |
 
+Every column except *Library / entry* can be hidden with the menu button at the right end of the column headers
+or with *View ▸ Columns*. The choice is kept across restarts, becomes the default for new tabs, and is stored in
+saved comparisons.
+
 Click a column header to sort; the first click on *Lines* or *Changes* puts the largest first. The status chips
 filter by status, the search box (Ctrl+F) matches libraries, classes, members and resources, and *Show build
-noise* reveals debug-info-only classes, manifest timestamps and signature files.
+noise* reveals debug-info-only classes, manifest timestamps and signature files. *Expand all* (Ctrl+Shift+E) opens
+every library, class and folder; *Collapse all* (Ctrl+Shift+C) folds the tree back to the libraries. Both are also
+in the *View* menu and the tree's context menu.
 
 **Inspect a change.** The right pane shows library metadata, or for a class the decompiled source diff, its API
 changes, the bytecode diff and the changed class files. The part that actually changed inside an edited line is
@@ -164,10 +178,18 @@ since the displayed result:
 
 ![Notices for changed options, an unused pattern and a reached limit](docs/images/gui-notices.png)
 
-**Manage the output.** *File ▸ Save report as JSON* (Ctrl+S) and *Open report* (Ctrl+O, or drop a `.json` on the
-window, which opens it in a tab) store and reopen results without re-running. *File ▸ Export* writes HTML, JSON or a patch, optionally
+**Save and open comparisons.** *File ▸ Save comparison* (Ctrl+S) and *Save comparison as* (Ctrl+Shift+S) store
+the whole tab in a `.jtcompare` file: the paths, all options, the filters, the hidden columns and, when the
+comparison has been run, its result. *File ▸ Open* (Ctrl+O, or drop the file on the window) reopens it in its own
+tab as it was, without re-running; Ctrl+S then saves back to it (the tooltip of the tab shows the file).
+Because the file records the options that produced the result, changing an option afterwards is flagged as
+usual. A comparison saved before it was run holds only its settings, which makes it a reusable definition to open
+and compare again later.
+
+**Manage the output.** *File ▸ Open* also opens JSON reports (or drop a `.json` on the window) to browse results
+without re-running. *File ▸ Export* writes HTML, JSON or a patch, optionally
 only the libraries the filter shows. *View ▸ Timings* (Ctrl+T) shows where the time went. *Help ▸ About* shows
-the version and the git commit of the build.
+the version and the git commit of the build, and the size and folder of the cache.
 
 Paths (with a drop-down of recent ones), options, diff mode and window layout are remembered between sessions.
 
@@ -209,8 +231,8 @@ Results are cached in `~/.jartree-compare/cache`:
 - **Decompiled sources:** keyed by the class file bytes, so a library version already decompiled in an earlier
   comparison is not decompiled again.
 
-Entries unused for 60 days are pruned. Clear the cache with *Tools ▸ Clear cache* or `--clear-cache`, and turn
-it off with the *Use cache* option or `--no-cache`.
+Entries unused for 60 days are pruned. *Help ▸ About* shows its current size and opens its folder. Clear the
+cache with *Tools ▸ Clear cache* or `--clear-cache`, and turn it off with the *Use cache* option or `--no-cache`.
 
 ## Limits and timings
 
@@ -251,7 +273,7 @@ large trees.
 | Report | Contents |
 |---|---|
 | HTML (`--html`) | Self-contained page: summary, status filters, search, collapsible colored diffs |
-| JSON (`--json`) | Full result: libraries, classes, members, resources, diffs, limits, timings. Reopen it with `--gui report.json` or *File ▸ Open report* |
+| JSON (`--json`) | Full result: libraries, classes, members, resources, diffs, limits, timings. Reopen it with `--gui report.json` or *File ▸ Open* |
 | Patch (`--patch`) | All decompiled source and text diffs as one unified diff, usable with `patch` or a diff viewer |
 
 ## Native executable

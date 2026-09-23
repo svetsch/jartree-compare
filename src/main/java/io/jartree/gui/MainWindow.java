@@ -12,6 +12,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 import javafx.application.HostServices;
+import javafx.beans.binding.Bindings;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
@@ -30,6 +31,7 @@ import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.Tab;
 import javafx.scene.control.TabPane;
 import javafx.scene.control.TextArea;
+import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.ToggleGroup;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
@@ -58,6 +60,10 @@ import io.jartree.report.PatchReport;
 final class MainWindow extends BorderPane {
 
     private static final FileChooser.ExtensionFilter JSON = new FileChooser.ExtensionFilter("JSON report", "*.json");
+    private static final FileChooser.ExtensionFilter COMPARISON = new FileChooser.ExtensionFilter(
+            "Comparison", "*." + ComparisonFile.EXTENSION);
+    private static final FileChooser.ExtensionFilter OPENABLE = new FileChooser.ExtensionFilter(
+            "Comparison or JSON report", "*." + ComparisonFile.EXTENSION, "*.json");
 
     private final Stage stage;
     private final HostServices hostServices;
@@ -124,7 +130,10 @@ final class MainWindow extends BorderPane {
         tab.textProperty().bind(pane.titleProperty());
         tab.setUserData(pane);
         Tooltip tooltip = new Tooltip();
-        tooltip.textProperty().bind(pane.titleProperty());
+        // the file Ctrl+S saves to, which a comparison run since opening or saving no longer names the tab after
+        tooltip.textProperty().bind(Bindings.createStringBinding(() -> pane.titleProperty().get()
+                        + (pane.fileProperty().get() == null ? "" : "\nSaved as " + pane.fileProperty().get()),
+                pane.titleProperty(), pane.fileProperty()));
         tab.setTooltip(tooltip);
         tab.setOnCloseRequest(e -> {
             if (pane.isRunning() && !confirm("Stop the comparison?",
@@ -215,12 +224,16 @@ final class MainWindow extends BorderPane {
         MenuItem compare = new MenuItem("Compare");
         compare.setAccelerator(new KeyCodeCombination(KeyCode.F5));
         compare.setOnAction(e -> withPane(ComparisonPane::compare));
-        MenuItem open = new MenuItem("Open report…");
+        MenuItem open = new MenuItem("Open…");
         open.setAccelerator(new KeyCodeCombination(KeyCode.O, KeyCombination.SHORTCUT_DOWN));
-        open.setOnAction(e -> chooseReport());
-        MenuItem save = new MenuItem("Save report as JSON…");
+        open.setOnAction(e -> chooseFile());
+        MenuItem save = new MenuItem("Save comparison");
         save.setAccelerator(new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN));
-        save.setOnAction(e -> export("json"));
+        save.setOnAction(e -> withPane(p -> saveComparison(p, false)));
+        MenuItem saveAs = new MenuItem("Save comparison as…");
+        saveAs.setAccelerator(new KeyCodeCombination(KeyCode.S, KeyCombination.SHORTCUT_DOWN,
+                KeyCombination.SHIFT_DOWN));
+        saveAs.setOnAction(e -> withPane(p -> saveComparison(p, true)));
         MenuItem html = new MenuItem("HTML report…");
         html.setOnAction(e -> export("html"));
         MenuItem patch = new MenuItem("Unified diff (patch)…");
@@ -234,21 +247,42 @@ final class MainWindow extends BorderPane {
         MenuItem exit = new MenuItem("Exit");
         exit.setOnAction(e -> stage.close());
         Menu file = new Menu("File", null, newComparison, duplicate, closeTab, new SeparatorMenuItem(), compare,
-                new SeparatorMenuItem(), open, save, exportMenu, browser, new SeparatorMenuItem(), exit);
-        resultActions.addAll(List.of(save, html, patch, json, browser));
+                new SeparatorMenuItem(), open, save, saveAs, new SeparatorMenuItem(), exportMenu, browser,
+                new SeparatorMenuItem(), exit);
+        resultActions.addAll(List.of(html, patch, json, browser));
 
         MenuItem find = new MenuItem("Find…");
         find.setAccelerator(new KeyCodeCombination(KeyCode.F, KeyCombination.SHORTCUT_DOWN));
         find.setOnAction(e -> withPane(ComparisonPane::focusSearch));
         MenuItem expand = new MenuItem("Expand all");
+        expand.setAccelerator(new KeyCodeCombination(KeyCode.E, KeyCombination.SHORTCUT_DOWN,
+                KeyCombination.SHIFT_DOWN));
         expand.setOnAction(e -> withPane(p -> p.tree().expandAll(true)));
         MenuItem collapse = new MenuItem("Collapse all");
+        collapse.setAccelerator(new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN,
+                KeyCombination.SHIFT_DOWN));
         collapse.setOnAction(e -> withPane(p -> p.tree().expandAll(false)));
         CheckMenuItem noise = new CheckMenuItem("Show build noise");
         noise.setOnAction(e -> withPane(p -> p.showNoiseBox().setSelected(noise.isSelected())));
         tabs.getSelectionModel().selectedItemProperty().addListener((obs, o, t) -> {
             ComparisonPane pane = pane(t);
             noise.setSelected(pane != null && pane.showNoise());
+        });
+        // rebuilt on every opening, so that it shows the columns of the active tab
+        Menu columns = new Menu("Columns");
+        columns.getItems().add(new MenuItem());
+        columns.setOnShowing(e -> {
+            columns.getItems().clear();
+            ComparisonPane pane = activePane();
+            if (pane == null) {
+                return;
+            }
+            for (TreeTableColumn<Item, ?> col : pane.tree().hideableColumns()) {
+                CheckMenuItem item = new CheckMenuItem(col.getText());
+                item.setSelected(col.isVisible());
+                item.setOnAction(a -> col.setVisible(item.isSelected()));
+                columns.getItems().add(item);
+            }
         });
         ToggleGroup modes = new ToggleGroup();
         RadioMenuItem unified = new RadioMenuItem("Unified diff");
@@ -284,7 +318,7 @@ final class MainWindow extends BorderPane {
                 KeyCombination.SHIFT_DOWN));
         previousTab.setOnAction(e -> selectTab(-1));
         Menu view = new Menu("View", null, find, nextClass, previousClass, new SeparatorMenuItem(), sortByChanges,
-                unsorted, new SeparatorMenuItem(), expand, collapse, new SeparatorMenuItem(), noise,
+                unsorted, new SeparatorMenuItem(), expand, collapse, new SeparatorMenuItem(), columns, noise,
                 new SeparatorMenuItem(), unified, side, new SeparatorMenuItem(), nextTab, previousTab,
                 new SeparatorMenuItem(), timings, showLog);
 
@@ -357,24 +391,66 @@ final class MainWindow extends BorderPane {
         withPane(ComparisonPane::compare);
     }
 
-    /** Opens a report in a new tab (or in the current one when it is still empty). */
-    void openReport(Path file) {
+    /**
+     * Opens a comparison file or a JSON report in a new tab (or in the current one when it is still empty). A
+     * comparison file that is already open in a tab is only brought to the front.
+     */
+    void open(Path file) {
+        boolean comparison = ComparisonFile.isComparisonFile(file);
+        if (comparison) {
+            Path normalized = file.toAbsolutePath().normalize();
+            for (Tab tab : tabs.getTabs()) {
+                ComparisonPane pane = pane(tab);
+                if (pane != null && normalized.equals(pane.fileProperty().get())) {
+                    tabs.getSelectionModel().select(tab);
+                    return;
+                }
+            }
+        }
         ComparisonPane pane = activePane();
-        if (pane == null || pane.result() != null || pane.isRunning()) {
+        if (pane == null || pane.result() != null || pane.isRunning() || pane.fileProperty().get() != null) {
             pane = addTab(null);
         }
-        pane.openReport(file);
+        if (comparison) {
+            pane.openComparison(file);
+        } else {
+            pane.openReport(file);
+        }
     }
 
-    private void chooseReport() {
+    private void chooseFile() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("Open JSON report");
-        chooser.getExtensionFilters().add(JSON);
-        initialDirectory(settings.get("lastReportDir", "")).ifPresent(chooser::setInitialDirectory);
+        chooser.setTitle("Open comparison or JSON report");
+        chooser.getExtensionFilters().addAll(OPENABLE, COMPARISON, JSON);
+        initialDirectory(settings.get("lastComparisonDir", settings.get("lastReportDir", "")))
+                .ifPresent(chooser::setInitialDirectory);
         File f = chooser.showOpenDialog(stage);
         if (f != null) {
-            openReport(f.toPath());
+            open(f.toPath());
         }
+    }
+
+    /** Saves the comparison of {@code pane} to its file, asking for one when it has none or {@code choose} is set. */
+    private void saveComparison(ComparisonPane pane, boolean choose) {
+        Path target = pane.fileProperty().get();
+        if (choose || target == null) {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Save comparison");
+            chooser.getExtensionFilters().add(COMPARISON);
+            chooser.setInitialFileName(target != null ? target.getFileName().toString()
+                    : pane.titleProperty().get().replaceAll("[^A-Za-z0-9._-]+", "_") + "." + ComparisonFile.EXTENSION);
+            initialDirectory(target != null ? target.toString() : settings.get("lastComparisonDir", ""))
+                    .ifPresent(chooser::setInitialDirectory);
+            File f = chooser.showSaveDialog(stage);
+            if (f == null) {
+                return;
+            }
+            target = f.toPath();
+            if (!ComparisonFile.isComparisonFile(target)) {
+                target = target.resolveSibling(target.getFileName() + "." + ComparisonFile.EXTENSION);
+            }
+        }
+        pane.saveComparison(target);
     }
 
     private void export(String kind) {
@@ -469,17 +545,23 @@ final class MainWindow extends BorderPane {
     }
 
     private void installDragAndDrop() {
-        // a JSON report dropped on the window opens in a tab
+        // a comparison file or a JSON report dropped on the window opens in a tab
         setOnDragOver(e -> {
-            if (e.getDragboard().hasFiles() && e.getDragboard().getFiles().get(0).getName().endsWith(".json")) {
+            if (e.getDragboard().hasFiles() && isOpenable(e.getDragboard().getFiles().get(0).toPath())) {
                 e.acceptTransferModes(TransferMode.COPY);
             }
         });
         setOnDragDropped(e -> {
             File f = e.getDragboard().getFiles().get(0);
-            openReport(f.toPath());
+            open(f.toPath());
             e.setDropCompleted(true);
         });
+    }
+
+    /** Whether {@link #open} accepts the file: a comparison file or a JSON report. */
+    static boolean isOpenable(Path file) {
+        return ComparisonFile.isComparisonFile(file)
+                || file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".json");
     }
 
     static Optional<File> initialDirectory(String text) {
@@ -493,13 +575,22 @@ final class MainWindow extends BorderPane {
 
     // ------------------------------------------------------------------ settings
 
-    /** Reopens the tabs of the last session (paths only, comparisons are not re-run). */
+    /**
+     * Reopens the tabs of the last session. A tab saved as a comparison file is reopened from that file (with its
+     * result, if the file holds one); the others get their paths back, and comparisons are not re-run.
+     */
     private void restoreTabs() {
         String stored = settings.get("tabs", "");
         for (String line : stored.split("\n")) {
-            String[] paths = line.split("\t", -1);
-            if (paths.length == 2 && !(paths[0].isBlank() && paths[1].isBlank())) {
-                addTab(paths);
+            String[] fields = line.split("\t", -1);
+            if (fields.length < 2) {
+                continue;
+            }
+            Path file = fields.length > 2 && !fields[2].isBlank() ? Path.of(fields[2]) : null;
+            if (file != null && Files.isRegularFile(file)) {
+                addTab(new String[] {fields[0], fields[1]}).openComparison(file);
+            } else if (!(fields[0].isBlank() && fields[1].isBlank())) {
+                addTab(new String[] {fields[0], fields[1]});
             }
         }
         if (tabs.getTabs().size() == 1) {
@@ -513,7 +604,8 @@ final class MainWindow extends BorderPane {
         for (Tab tab : tabs.getTabs()) {
             ComparisonPane pane = pane(tab);
             if (pane != null) {
-                open.add(pane.oldPathText() + "\t" + pane.newPathText());
+                Path file = pane.fileProperty().get();
+                open.add(pane.oldPathText() + "\t" + pane.newPathText() + "\t" + (file == null ? "" : file));
             }
         }
         settings.put("tabs", String.join("\n", open));

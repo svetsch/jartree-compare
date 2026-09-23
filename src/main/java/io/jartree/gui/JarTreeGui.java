@@ -11,7 +11,8 @@ import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
 /**
- * JavaFX front end. Arguments: none, {@code OLD NEW} (compared on start), or a JSON report to open.
+ * JavaFX front end. Arguments: none, {@code OLD NEW} (compared on start), or a comparison file or JSON report to
+ * open.
  */
 public final class JarTreeGui extends Application {
 
@@ -48,8 +49,8 @@ public final class JarTreeGui extends Application {
         stage.show();
 
         List<String> args = getParameters().getUnnamed();
-        if (args.size() == 1 && args.get(0).toLowerCase().endsWith(".json") && Files.isRegularFile(Path.of(args.get(0)))) {
-            window.openReport(Path.of(args.get(0)));
+        if (args.size() == 1 && MainWindow.isOpenable(Path.of(args.get(0))) && Files.isRegularFile(Path.of(args.get(0)))) {
+            window.open(Path.of(args.get(0)));
         } else if (args.size() == 2) {
             window.setPaths(args.get(0), args.get(1));
             window.compare();

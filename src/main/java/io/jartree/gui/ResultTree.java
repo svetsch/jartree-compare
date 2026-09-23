@@ -1,6 +1,7 @@
 package io.jartree.gui;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -46,6 +47,7 @@ final class ResultTree extends TreeTableView<Item> {
 
     private final TreeItem<Item> root = new TreeItem<>();
     private final TreeTableColumn<Item, Item> changesColumn;
+    private final List<Runnable> columnListeners = new ArrayList<>();
     private List<LibraryDiff> libraries = List.of();
     private final Set<LibraryDiff> expanded = Collections.newSetFromMap(new IdentityHashMap<>());
     private final Map<TreeItem<Item>, Integer> naturalOrder = new IdentityHashMap<>();
@@ -59,27 +61,43 @@ final class ResultTree extends TreeTableView<Item> {
         getStyleClass().add("result-tree");
         setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         setPlaceholder(new Label("Choose the old and new directories (or archives) and press Compare,\n"
-                + "or open a JSON report with File ▸ Open report."));
+                + "or open a saved comparison or JSON report with File ▸ Open."));
 
-        TreeTableColumn<Item, Item> name = column("Library / entry", 380);
+        TreeTableColumn<Item, Item> name = column("name", "Library / entry", 380);
         name.setCellFactory(c -> new NameCell());
         name.setComparator(Comparator.comparing(ResultTree::nameText, String.CASE_INSENSITIVE_ORDER));
-        TreeTableColumn<Item, Item> status = column("Status", 100);
+        TreeTableColumn<Item, Item> archive = column("archive", "Archive name", 160);
+        archive.setCellFactory(c -> new TextCell(Item::archiveName, i -> null));
+        archive.setComparator(Comparator.comparing(Item::archiveName, String.CASE_INSENSITIVE_ORDER));
+        TreeTableColumn<Item, Item> file = column("file", "File name", 160);
+        file.setCellFactory(c -> new TextCell(Item::fileName, i -> null));
+        file.setComparator(Comparator.comparing(Item::fileName, String.CASE_INSENSITIVE_ORDER));
+        TreeTableColumn<Item, Item> status = column("status", "Status", 100);
         status.setCellFactory(c -> new TextCell(ResultTree::statusText, ResultTree::statusStyle));
         status.setComparator(Comparator.comparingInt(ResultTree::statusRank).thenComparing(ResultTree::statusText));
-        TreeTableColumn<Item, Item> version = column("Version", 110);
+        TreeTableColumn<Item, Item> version = column("version", "Version", 110);
         version.setCellFactory(c -> new TextCell(ResultTree::versionText, i -> null));
         version.setComparator(Comparator.comparing(ResultTree::versionText));
-        TreeTableColumn<Item, Item> lines = column("Lines", 110);
+        TreeTableColumn<Item, Item> lines = column("lines", "Lines", 110);
         lines.setCellFactory(c -> new LinesCell());
         // most modified lines first on the first click
         lines.setComparator(Comparator.comparingLong(ResultTree::lineTotal).reversed());
-        changesColumn = column("Changes", 120);
+        changesColumn = column("changes", "Changes", 120);
         changesColumn.setCellFactory(c -> new TextCell(ResultTree::changesText, i -> "changes-cell"));
         // most changes first on the first click
         changesColumn.setComparator(Comparator.comparingLong(ResultTree::changeWeight).reversed());
-        getColumns().setAll(List.of(name, status, version, lines, changesColumn));
+        getColumns().setAll(List.of(name, archive, file, status, version, lines, changesColumn));
         setTreeColumn(name);
+        // every column but the tree column can be hidden, with the menu button in the header or View ▸ Columns
+        setTableMenuButtonVisible(true);
+        name.visibleProperty().addListener((obs, o, visible) -> {
+            if (!visible) {
+                name.setVisible(true);
+            }
+        });
+        for (TreeTableColumn<Item, ?> col : getColumns()) {
+            col.visibleProperty().addListener((obs, o, n) -> columnListeners.forEach(Runnable::run));
+        }
 
         setSortPolicy(table -> {
             Item selected = selectedItem();
@@ -93,8 +111,9 @@ final class ResultTree extends TreeTableView<Item> {
         });
     }
 
-    private static TreeTableColumn<Item, Item> column(String title, double width) {
+    private static TreeTableColumn<Item, Item> column(String id, String title, double width) {
         TreeTableColumn<Item, Item> col = new TreeTableColumn<>(title);
+        col.setId(id);
         col.setPrefWidth(width);
         col.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue().getValue()));
         return col;
@@ -112,6 +131,28 @@ final class ResultTree extends TreeTableView<Item> {
         for (TreeItem<Item> child : children) {
             sortChildren(child, comparator);
         }
+    }
+
+    /** The columns that can be hidden, in display order. */
+    List<TreeTableColumn<Item, ?>> hideableColumns() {
+        return getColumns().stream().filter(c -> c != getTreeColumn()).toList();
+    }
+
+    /** Ids of the hidden columns, as stored in the settings and in comparison files. */
+    List<String> hiddenColumns() {
+        return hideableColumns().stream().filter(c -> !c.isVisible()).map(TreeTableColumn::getId).toList();
+    }
+
+    /** Shows every column except those with the given ids; unknown ids are ignored. */
+    void setHiddenColumns(Collection<String> ids) {
+        for (TreeTableColumn<Item, ?> col : hideableColumns()) {
+            col.setVisible(!ids.contains(col.getId()));
+        }
+    }
+
+    /** Calls {@code listener} whenever a column is shown or hidden. */
+    void onColumnVisibilityChange(Runnable listener) {
+        columnListeners.add(listener);
     }
 
     /** Sorts by number of changes, largest first. */

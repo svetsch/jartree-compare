@@ -36,7 +36,8 @@ import picocli.CommandLine.Parameters;
                         + "content. Changed libraries are compared entry by entry; changed classes are decompiled "
                         + "with Vineflower and their source is diffed.",
                 "",
-                "Run without arguments, or with --gui [OLD NEW | REPORT.json], to open the graphical interface.",
+                "Run without arguments, or with --gui [OLD NEW | FILE.jtcompare | REPORT.json], to open the graphical",
+                "interface.",
                 ""},
         exitCodeListHeading = "%nExit codes:%n",
         exitCodeList = {

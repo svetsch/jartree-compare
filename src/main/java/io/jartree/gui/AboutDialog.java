@@ -1,6 +1,9 @@
 package io.jartree.gui;
 
+import java.nio.file.Files;
+
 import javafx.application.HostServices;
+import javafx.application.Platform;
 import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
@@ -17,8 +20,10 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 
 import io.jartree.BuildInfo;
+import io.jartree.compare.ResultCache;
+import io.jartree.report.ConsoleReport;
 
-/** About box: version, git commit of this build, runtime and the libraries used. */
+/** About box: version, git commit of this build, runtime, cache and the libraries used. */
 final class AboutDialog {
 
     private AboutDialog() {
@@ -59,6 +64,16 @@ final class AboutDialog {
                 + System.getProperty("java.vendor")));
         grid.addRow(row++, muted("JavaFX"), mono(System.getProperty("javafx.runtime.version", "unknown")));
         grid.addRow(row++, muted("Maximum heap"), mono(BuildInfo.maxHeap()));
+        ResultCache cache = new ResultCache(ResultCache.defaultDirectory());
+        grid.addRow(row++, muted("Cache size"), cacheSize(cache));
+        if (Files.isDirectory(cache.directory())) {
+            Hyperlink folder = new Hyperlink(cache.directory().toString());
+            folder.getStyleClass().add("mono");
+            folder.setOnAction(e -> open(hostServices, cache.directory().toUri().toString()));
+            grid.addRow(row++, muted("Cache folder"), folder);
+        } else {
+            grid.addRow(row++, muted("Cache folder"), mono(cache.directory() + " (not created yet)"));
+        }
         grid.addRow(row++, muted("License"), mono("MIT"));
         Hyperlink repository = new Hyperlink(BuildInfo.REPOSITORY);
         repository.setOnAction(e -> open(hostServices, BuildInfo.REPOSITORY));
@@ -83,12 +98,25 @@ final class AboutDialog {
         stage.initOwner(owner);
         stage.initModality(Modality.APPLICATION_MODAL);
         stage.setTitle("About jartree-compare");
-        Scene scene = new Scene(box, 580, 390);
+        Scene scene = new Scene(box, 580, 440);
         if (owner != null && owner.getScene() != null) {
             scene.getStylesheets().addAll(owner.getScene().getStylesheets());
         }
         stage.setScene(scene);
         stage.showAndWait();
+    }
+
+    /** A label that shows the size of the cache once it is known; walking a large cache takes a moment. */
+    private static Label cacheSize(ResultCache cache) {
+        Label label = mono("calculating…");
+        Thread thread = new Thread(() -> {
+            long size = cache.size();
+            Platform.runLater(() -> label.setText(size == 0 ? "empty" : ConsoleReport.size(size)
+                    + "  ·  cleared with Tools ▸ Clear cache"));
+        }, "jartree-about-cache-size");
+        thread.setDaemon(true);
+        thread.start();
+        return label;
     }
 
     /** Version information in one block, for bug reports. */

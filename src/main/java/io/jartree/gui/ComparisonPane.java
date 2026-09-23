@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -99,10 +100,21 @@ final class ComparisonPane extends BorderPane {
     private final DoubleProperty progress = new SimpleDoubleProperty(-1);
     private final BooleanProperty running = new SimpleBooleanProperty(false);
     private final ObjectProperty<ComparisonResult> result = new SimpleObjectProperty<>();
+    /** The comparison file this tab was opened from or saved to; null when there is none. */
+    private final ObjectProperty<Path> file = new SimpleObjectProperty<>();
 
     private Task<ComparisonResult> task;
     /** Paths and result-relevant options of the displayed result; null when nothing is displayed. */
     private Map<String, String> appliedSettings;
+    /**
+     * Name of what produced the displayed result: the compared paths or a report; null while there is none, and
+     * then the tab follows the typed paths.
+     */
+    private String contentName;
+    /** Tab name of the running comparison: the compared paths. */
+    private String runningSource;
+    /** Set while a comparison file is applied, so that its view settings do not become the defaults. */
+    private boolean applyingFile;
 
     ComparisonPane(Stage stage, Settings settings, ObjectProperty<DiffView.Mode> diffMode, Consumer<String> log,
                    Runnable showLog) {
@@ -126,15 +138,25 @@ final class ComparisonPane extends BorderPane {
         tree.setContextMenu(treeContextMenu());
 
         loadSettings();
+        tree.onColumnVisibilityChange(() -> {
+            if (!applyingFile) {
+                settings.put("hiddenColumns", String.join(",", tree.hiddenColumns()));
+            }
+        });
         installDragAndDrop();
         options.onResultOptionChange(this::updateNotices);
-        oldPath.getEditor().textProperty().addListener((obs, o, n) -> updateNotices());
-        newPath.getEditor().textProperty().addListener((obs, o, n) -> updateNotices());
+        for (PathField field : List.of(oldPath, newPath)) {
+            field.getEditor().textProperty().addListener((obs, o, n) -> {
+                updateNotices();
+                updateTitle();
+            });
+        }
+        updateTitle();
     }
 
     // ------------------------------------------------------------------ state seen by the window
 
-    /** Tab title: the two file names, or the name of an opened report. */
+    /** Tab title: the name of the comparison file, the two file names, or the name of an opened report. */
     StringProperty titleProperty() {
         return title;
     }
@@ -161,6 +183,10 @@ final class ComparisonPane extends BorderPane {
 
     ComparisonResult result() {
         return result.get();
+    }
+
+    ObjectProperty<Path> fileProperty() {
+        return file;
     }
 
     ResultTree tree() {
@@ -277,7 +303,11 @@ final class ComparisonPane extends BorderPane {
         });
         Region gap = new Region();
         gap.setMinWidth(8);
-        bar.getChildren().addAll(gap, search, showNoise);
+        Button expandAll = button("Expand all", () -> tree.expandAll(true));
+        expandAll.setTooltip(new Tooltip("Expand every library, class and folder (Ctrl+Shift+E)"));
+        Button collapseAll = button("Collapse all", () -> tree.expandAll(false));
+        collapseAll.setTooltip(new Tooltip("Collapse the tree to the libraries (Ctrl+Shift+C)"));
+        bar.getChildren().addAll(gap, search, showNoise, expandAll, collapseAll);
         return bar;
     }
 
@@ -373,7 +403,10 @@ final class ComparisonPane extends BorderPane {
             }
         };
         task = comparison;
-        title.set(oldRoot.getFileName() + " ⇄ " + newRoot.getFileName());
+        String source = pathTitle(oldRoot.toString(), newRoot.toString());
+        runningSource = source;
+        // named after the new paths from the start; a cancelled or failed run gives back the previous name
+        updateTitle();
         updateNotices();
         status.bind(comparison.messageProperty());
         progress.bind(comparison.progressProperty());
@@ -391,11 +424,13 @@ final class ComparisonPane extends BorderPane {
             compareButton.setDisable(false);
             cancelButton.setDisable(true);
             task = null;
+            runningSource = null;
+            updateTitle();
             switch (state) {
                 case SUCCEEDED -> {
                     ComparisonResult r = comparison.getValue();
                     appliedSettings = requested;
-                    showResult(r, oldRoot.getFileName() + " ⇄ " + newRoot.getFileName());
+                    showResult(r, source);
                     String reused = cache == null ? "" : cacheSummary(cache);
                     status.set("Compared in " + r.duration().toMillis() + " ms" + reused);
                     log.accept("Done: " + countsText(r));
@@ -446,13 +481,15 @@ final class ComparisonPane extends BorderPane {
         return p.toAbsolutePath().normalize();
     }
 
+    /** Displays a result; {@code source} names the tab unless the tab has a file. */
     private void showResult(ComparisonResult r, String source) {
+        contentName = source;
         result.set(r);
         Map<LibraryStatus, Integer> counts = r.countsByStatus();
         statusToggles.forEach((s, t) -> t.setText(s.name().toLowerCase(Locale.ROOT) + "  " + counts.get(s)));
         tree.setLibraries(r.libraries());
         applyFilter();
-        title.set(source);
+        updateTitle();
         r.warnings().forEach(w -> log.accept("Warning: " + w));
         r.limits().hints().forEach(h -> log.accept("Limit reached: " + h));
         detail.show(null);
@@ -473,13 +510,137 @@ final class ComparisonPane extends BorderPane {
                 appliedSettings.put("Max classes / library", String.valueOf(r.limits().maxClasses()));
                 appliedSettings.put("Nested archive depth", String.valueOf(r.limits().nestedDepth()));
             }
-            showResult(r, file.getFileName().toString());
+            this.file.set(null);
+            showResult(r, fileTitle(file));
             status.set("Opened " + file);
             log.accept("Opened report " + file);
             settings.put("lastReportDir", file.getParent() == null ? null : file.getParent().toString());
         } catch (IOException e) {
             Dialogs.error(stage, "Could not open report", e);
         }
+    }
+
+    /** Opens a comparison file: its paths, options, filters and, when it holds one, its result. */
+    void openComparison(Path path) {
+        ComparisonFile c;
+        try {
+            c = ComparisonFile.read(path);
+        } catch (IOException e) {
+            Dialogs.error(stage, "Could not open comparison", e);
+            return;
+        }
+        setPaths(c.oldPath(), c.newPath());
+        options.apply(c.options());
+        if (c.hiddenColumns() != null) {
+            applyingFile = true;
+            try {
+                tree.setHiddenColumns(c.hiddenColumns());
+            } finally {
+                applyingFile = false;
+            }
+        }
+        statusToggles.forEach((s, t) -> t.setSelected(c.statuses().contains(s)));
+        search.setText(c.search());
+        showNoise.setSelected(c.showNoise());
+        file.set(path.toAbsolutePath().normalize());
+        // named after its paths, as it was when it was saved; the file is in the tab's tooltip
+        contentName = null;
+        settings.put("lastComparisonDir", parentOf(path));
+        if (!c.oldPath().isBlank() || !c.newPath().isBlank()) {
+            rememberPaths();
+        }
+        if (c.result() != null) {
+            appliedSettings = c.appliedSettings();
+            showResult(c.result(), pathTitle(c.result().oldRoot().toString(), c.result().newRoot().toString()));
+        } else {
+            updateTitle();
+            updateNotices();
+        }
+        status.set("Opened " + path);
+        log.accept("Opened comparison " + path);
+    }
+
+    /** Saves this comparison, with its result when there is one, and makes {@code path} the file of this tab. */
+    boolean saveComparison(Path path) {
+        ComparisonResult r = result.get();
+        Set<LibraryStatus> shown = EnumSet.noneOf(LibraryStatus.class);
+        statusToggles.forEach((s, t) -> {
+            if (t.isSelected()) {
+                shown.add(s);
+            }
+        });
+        ComparisonFile c = new ComparisonFile(oldPath.getText().trim(), newPath.getText().trim(), options.toMap(),
+                shown, search.getText(), showNoise.isSelected(), tree.hiddenColumns(),
+                r == null ? null : appliedSettings, r);
+        try {
+            c.write(path);
+        } catch (IOException e) {
+            Dialogs.error(stage, "Could not save comparison", e);
+            return false;
+        }
+        // saving does not rename the tab; the file is in its tooltip
+        file.set(path.toAbsolutePath().normalize());
+        settings.put("lastComparisonDir", parentOf(path));
+        status.set("Saved " + path + (r == null ? " (without result)" : ""));
+        log.accept("Saved comparison " + path);
+        return true;
+    }
+
+    /** The name of a comparison file without its extension. */
+    static String fileTitle(Path path) {
+        String name = path.getFileName().toString();
+        return ComparisonFile.isComparisonFile(path)
+                ? name.substring(0, name.length() - ComparisonFile.EXTENSION.length() - 1) : name;
+    }
+
+    /**
+     * Names the tab after what produced its content: a running comparison names it after its paths from the
+     * start, a finished one (or one opened from a comparison file) keeps that name, and an opened report names it
+     * after the report. A cancelled or failed comparison gives back the name of what the tab still shows. Without
+     * any of these the tab follows the paths as typed. Saving never renames the tab.
+     */
+    private void updateTitle() {
+        if (task != null && runningSource != null) {
+            title.set(runningSource);
+        } else if (contentName != null) {
+            title.set(contentName);
+        } else {
+            title.set(pathTitle(oldPath.getText(), newPath.getText()));
+        }
+    }
+
+    /** "old ⇄ new" from the last name of each path, or "New comparison" when both are empty. */
+    static String pathTitle(String oldText, String newText) {
+        String oldName = lastName(oldText);
+        String newName = lastName(newText);
+        if (oldName.isEmpty() && newName.isEmpty()) {
+            return "New comparison";
+        }
+        return (oldName.isEmpty() ? "?" : oldName) + " ⇄ " + (newName.isEmpty() ? "?" : newName);
+    }
+
+    /**
+     * The name of a path: the last name of the absolute, normalized path, so that "." or "lib/.." name the same
+     * directory before and after a comparison; the path itself for a root such as "C:\"; and the last name of the
+     * text when it is not a valid path (yet).
+     */
+    private static String lastName(String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) {
+            return "";
+        }
+        try {
+            Path p = Path.of(t).toAbsolutePath().normalize();
+            return p.getFileName() == null ? p.toString() : p.getFileName().toString();
+        } catch (InvalidPathException e) {
+            String stripped = t.replaceAll("[/\\\\]+$", "");
+            return stripped.substring(Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf('\\')) + 1);
+        }
+    }
+
+    private static String parentOf(Path path) {
+        Path parent = path.toAbsolutePath().getParent();
+        return parent == null ? null : parent.toString();
     }
 
     // ------------------------------------------------------------------ result access
@@ -695,6 +856,7 @@ final class ComparisonPane extends BorderPane {
         oldPath.setText(settings.get("oldPath", ""));
         newPath.setText(settings.get("newPath", ""));
         showNoise.setSelected(settings.getBoolean("showNoise", false));
+        tree.setHiddenColumns(List.of(settings.get("hiddenColumns", "").split(",")));
         options.load(settings);
     }
 

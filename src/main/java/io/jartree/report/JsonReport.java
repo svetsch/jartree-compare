@@ -30,6 +30,19 @@ public final class JsonReport {
     }
 
     public void write(ComparisonResult result, Path file) throws IOException {
+        writeJson(toMap(result), file);
+    }
+
+    /** Writes a tree of maps, collections, strings, numbers and booleans as indented JSON. */
+    public static void writeJson(Object value, Path file) throws IOException {
+        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            writeValue(w, value, "");
+            w.write('\n');
+        }
+    }
+
+    /** The report as a tree of maps and lists, as written by {@link #write}. */
+    public Map<String, Object> toMap(ComparisonResult result) {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "jartree-compare/1");
         root.put("oldRoot", result.oldRoot().toString());
@@ -70,10 +83,7 @@ public final class JsonReport {
         }).toList());
         root.put("timings", timings);
         root.put("libraries", result.libraries().stream().map(this::library).toList());
-        try (Writer w = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
-            writeValue(w, root, "");
-            w.write('\n');
-        }
+        return root;
     }
 
     /** Serializes a single library diff including all diffs (used by the result cache). */

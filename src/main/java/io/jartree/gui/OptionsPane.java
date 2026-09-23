@@ -1,9 +1,11 @@
 package io.jartree.gui;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import javafx.geometry.Insets;
@@ -153,6 +155,47 @@ final class OptionsPane extends TitledPane {
         s.putInt("opt.context", context.getValue());
         s.putInt("opt.threads", threads.getValue());
         s.putInt("opt.nestedDepth", nestedDepth.getValue());
+    }
+
+    /** All options, for a comparison file; {@link #apply} restores them. */
+    Map<String, Object> toMap() {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("includes", includes.getText());
+        m.put("excludes", excludes.getText());
+        m.put("packages", packages.getText());
+        m.put("ignoredEntries", ignoredEntries.getText());
+        m.put("extensions", extensions.getText());
+        m.put("decompile", decompile.isSelected());
+        m.put("decompileAdded", decompileAdded.isSelected());
+        m.put("bytecode", bytecode.isSelected());
+        m.put("cache", cache.isSelected());
+        m.put("maxClasses", maxClasses.getValue());
+        m.put("context", context.getValue());
+        m.put("threads", threads.getValue());
+        m.put("nestedDepth", nestedDepth.getValue());
+        return m;
+    }
+
+    /** Restores options stored by {@link #toMap}; missing or malformed values keep their current setting. */
+    void apply(Map<?, ?> m) {
+        for (Map.Entry<String, TextField> e : Map.of("includes", includes, "excludes", excludes, "packages", packages,
+                "ignoredEntries", ignoredEntries, "extensions", extensions).entrySet()) {
+            if (m.get(e.getKey()) instanceof String text) {
+                e.getValue().setText(text);
+            }
+        }
+        for (Map.Entry<String, CheckBox> e : Map.of("decompile", decompile, "decompileAdded", decompileAdded,
+                "bytecode", bytecode, "cache", cache).entrySet()) {
+            if (m.get(e.getKey()) instanceof Boolean value) {
+                e.getValue().setSelected(value);
+            }
+        }
+        for (Map.Entry<String, Spinner<Integer>> e : Map.of("maxClasses", maxClasses, "context", context,
+                "threads", threads, "nestedDepth", nestedDepth).entrySet()) {
+            if (m.get(e.getKey()) instanceof Number value) {
+                e.getValue().getValueFactory().setValue(value.intValue());
+            }
+        }
     }
 
     private static List<String> split(String text) {

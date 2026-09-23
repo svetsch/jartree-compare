@@ -55,7 +55,7 @@ public final class GuiSnapshot {
             scene.getStylesheets().add(JarTreeGui.class.getResource("app.css").toExternalForm());
             stage.setScene(scene);
             stage.show();
-            window.openReport(report);
+            window.open(report);
             if (!search.isEmpty()) {
                 ((javafx.scene.control.TextField) scene.lookup(".filter-bar .text-field")).setText(search);
             }
@@ -133,7 +133,7 @@ public final class GuiSnapshot {
             stage.show();
             for (int i = 2; i < args.length; i++) {
                 window.addTab(null);
-                window.openReport(Path.of(args[i]));
+                window.open(Path.of(args[i]));
             }
             sceneHolder[0] = scene;
             opened.countDown();
