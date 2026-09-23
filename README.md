@@ -117,6 +117,15 @@ java -jar target/jartree-compare.jar --gui OLD NEW           # compare immediate
 java -jar target/jartree-compare.jar --gui report.json       # open a saved report
 ```
 
+**Several comparisons at once.** Each comparison lives in its own tab with its own paths, options, filters and
+result; the menu and the status bar always act on the active tab. Open a tab with the **+** next to the tabs or
+*File ▸ New comparison* (Ctrl+N), copy the current paths into a new tab with *File ▸ Duplicate comparison*, and
+close one with Ctrl+W. Comparisons in different tabs run at the same time (decompilation itself is serialized,
+so tabs queue for it). The tabs of the last session are reopened on start, with their paths but without
+results.
+
+![Several comparisons in tabs](docs/images/gui-tabs.png)
+
 **Run a comparison.** Choose the old and new tree (folder, archive, or drag and drop), adjust *Options* and
 press **Compare** (F5). The comparison runs in the background with progress and can be cancelled.
 
@@ -155,7 +164,7 @@ since the displayed result:
 ![Notices for changed options, an unused pattern and a reached limit](docs/images/gui-notices.png)
 
 **Manage the output.** *File ▸ Save report as JSON* (Ctrl+S) and *Open report* (Ctrl+O, or drop a `.json` on the
-window) store and reopen results without re-running. *File ▸ Export* writes HTML, JSON or a patch, optionally
+window, which opens it in a tab) store and reopen results without re-running. *File ▸ Export* writes HTML, JSON or a patch, optionally
 only the libraries the filter shows. *View ▸ Timings* (Ctrl+T) shows where the time went. *Help ▸ About* shows
 the version and the git commit of the build.
 

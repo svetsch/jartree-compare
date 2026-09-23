@@ -377,3 +377,24 @@
 .result-tree .tree-table-row-cell:selected .lines-removed {
     -fx-text-fill: -fx-selection-bar-text;
 }
+
+/* ------------------------------------------------------------------ tabs */
+
+.main-window .tab-pane > .tab-header-area > .tab-header-background {
+    -fx-background-color: derive(-fx-background, -6%);
+}
+
+.main-window .tab-pane .tab {
+    -fx-padding: 4 12 4 12;
+}
+
+.main-window .tab-pane .tab:selected .tab-label {
+    -fx-font-weight: bold;
+}
+
+/* the "+" tab acts as a button */
+.main-window .tab-pane #new-tab .tab-label {
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -jt-accent;
+}

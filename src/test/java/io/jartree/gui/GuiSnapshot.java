@@ -25,6 +25,10 @@ public final class GuiSnapshot {
             compare(args);
             return;
         }
+        if (args[0].equals("--tabs")) {
+            tabs(args);
+            return;
+        }
         if (args[0].equals("--about")) {
             about(new File(args[1]));
             return;
@@ -56,13 +60,7 @@ public final class GuiSnapshot {
             }
             if (args.length > 5 && args[5].equals("stale")) {
                 // simulate the user changing an option after the comparison
-                try {
-                    var f = MainWindow.class.getDeclaredField("options");
-                    f.setAccessible(true);
-                    ((OptionsPane) f.get(window)).setMaxClasses(5000);
-                } catch (ReflectiveOperationException e) {
-                    throw new IllegalStateException(e);
-                }
+                window.activePane().options().setMaxClasses(5000);
             }
             window.tree().select(i -> ResultTree.nameText(i).contains(select));
             // switch mode after selection so the detail view follows the property change
@@ -89,6 +87,39 @@ public final class GuiSnapshot {
         done.await();
         Platform.exit();
         System.out.println("wrote " + out.getAbsolutePath());
+    }
+
+    /** Opens one tab per report and renders the window. Usage: --tabs OUT.png REPORT.json... */
+    private static void tabs(String[] args) throws Exception {
+        CountDownLatch started = new CountDownLatch(1);
+        Platform.startup(started::countDown);
+        started.await();
+        Scene[] sceneHolder = new Scene[1];
+        CountDownLatch opened = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            Stage stage = new Stage();
+            MainWindow window = new MainWindow(stage, null);
+            Scene scene = new Scene(window, 1360, 860);
+            scene.getStylesheets().add(JarTreeGui.class.getResource("app.css").toExternalForm());
+            stage.setScene(scene);
+            stage.show();
+            for (int i = 2; i < args.length; i++) {
+                window.addTab(null);
+                window.openReport(Path.of(args[i]));
+            }
+            sceneHolder[0] = scene;
+            opened.countDown();
+        });
+        opened.await();
+        Thread.sleep(2500);
+        CountDownLatch done = new CountDownLatch(1);
+        Platform.runLater(() -> {
+            write(sceneHolder[0], new File(args[1]));
+            done.countDown();
+        });
+        done.await();
+        Platform.exit();
+        System.out.println("wrote " + args[1]);
     }
 
     /** Renders the modal About dialog; it is found by title because it runs its own event loop. */
