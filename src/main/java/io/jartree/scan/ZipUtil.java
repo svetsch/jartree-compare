@@ -6,19 +6,24 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
 
-/** Helpers to stream the entries of an in-memory zip archive. */
+/**
+ * Helpers to read zip archives. Entries are streamed one at a time: an archive is never held decompressed in
+ * memory as a whole.
+ */
 public final class ZipUtil {
 
     @FunctionalInterface
@@ -30,15 +35,23 @@ public final class ZipUtil {
     }
 
     /**
-     * Visits every non-directory entry. Falls back to {@link ZipFile} (via a temporary file) for archives that
-     * {@link ZipInputStream} cannot handle, e.g. executable jars with a prepended launch script or stored entries
-     * with data descriptors.
+     * Visits every non-directory entry of an in-memory archive. Falls back to {@link ZipFile} (via a temporary
+     * file) for archives that {@link ZipInputStream} cannot handle, e.g. executable jars with a prepended launch
+     * script or stored entries with data descriptors; entries already visited are then skipped.
      */
     public static void forEachEntry(byte[] data, EntryVisitor visitor) throws IOException {
-        boolean startsWithLocalHeader = data.length >= 4 && data[0] == 'P' && data[1] == 'K' && data[2] == 3 && data[3] == 4;
-        if (startsWithLocalHeader) {
+        Set<String> visited = new HashSet<>();
+        if (looksLikeZip(data)) {
             try {
-                streamEntries(data, visitor);
+                try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(data))) {
+                    ZipEntry e;
+                    while ((e = zin.getNextEntry()) != null) {
+                        if (!e.isDirectory()) {
+                            visited.add(e.getName());
+                            visitor.visit(e.getName(), zin.readAllBytes());
+                        }
+                    }
+                }
                 return;
             } catch (ZipException | UnsupportedOperationException e) {
                 // fall through to the central-directory based reader
@@ -47,7 +60,11 @@ public final class ZipUtil {
         Path tmp = Files.createTempFile("jartree-", ".zip");
         try {
             Files.write(tmp, data);
-            forEachEntry(tmp, visitor);
+            forEachEntry(tmp, (name, content) -> {
+                if (visited.add(name)) {
+                    visitor.visit(name, content);
+                }
+            });
         } finally {
             Files.deleteIfExists(tmp);
         }
@@ -68,35 +85,62 @@ public final class ZipUtil {
         }
     }
 
-    private static void streamEntries(byte[] data, EntryVisitor visitor) throws IOException {
-        // collect first so that a failure half-way does not produce duplicate visits on fallback
-        List<Map.Entry<String, byte[]>> entries = new ArrayList<>();
-        try (ZipInputStream zin = new ZipInputStream(new ByteArrayInputStream(data))) {
-            ZipEntry e;
-            while ((e = zin.getNextEntry()) != null) {
-                if (!e.isDirectory()) {
-                    entries.add(Map.entry(e.getName(), zin.readAllBytes()));
+    /** Reads only the named entries of an archive file, using the central directory. */
+    public static Map<String, byte[]> readEntries(Path file, Set<String> names) throws IOException {
+        Map<String, byte[]> result = new TreeMap<>();
+        if (names.isEmpty()) {
+            return result;
+        }
+        try (ZipFile zf = new ZipFile(file.toFile())) {
+            for (String name : names) {
+                ZipEntry entry = zf.getEntry(name);
+                if (entry != null && !entry.isDirectory()) {
+                    try (InputStream in = zf.getInputStream(entry)) {
+                        result.put(name, in.readAllBytes());
+                    }
                 }
             }
         }
-        for (var entry : entries) {
-            visitor.visit(entry.getKey(), entry.getValue());
+        return result;
+    }
+
+    /** Reads only the named entries of an in-memory archive, in one pass. */
+    public static Map<String, byte[]> readEntries(byte[] data, Set<String> names) throws IOException {
+        Map<String, byte[]> result = new TreeMap<>();
+        if (names.isEmpty()) {
+            return result;
         }
+        forEachEntry(data, (name, content) -> {
+            if (names.contains(name)) {
+                result.put(name, content);
+            }
+        });
+        return result;
     }
 
     /** Extracts a single entry, or {@code null} if absent. */
     public static byte[] extract(byte[] archive, String entryName) throws IOException {
-        byte[][] result = new byte[1][];
-        forEachEntry(archive, (name, content) -> {
-            if (result[0] == null && name.equals(entryName)) {
-                result[0] = content;
-            }
-        });
-        return result[0];
+        return readEntries(archive, Set.of(entryName)).get(entryName);
+    }
+
+    public static boolean looksLikeZip(byte[] data) {
+        return data.length >= 4 && data[0] == 'P' && data[1] == 'K' && data[2] == 3 && data[3] == 4;
     }
 
     public static String sha256(byte[] data) {
         return HexFormat.of().formatHex(digest().digest(data));
+    }
+
+    /** Digest of a file, computed while streaming it: the file is not held in memory. */
+    public static String sha256(Path file) throws IOException {
+        MessageDigest md = digest();
+        try (InputStream in = new DigestInputStream(Files.newInputStream(file), md)) {
+            byte[] buffer = new byte[64 * 1024];
+            while (in.read(buffer) >= 0) {
+                // the digest is updated while reading
+            }
+        }
+        return HexFormat.of().formatHex(md.digest());
     }
 
     public static MessageDigest digest() {

@@ -15,11 +15,37 @@ import io.jartree.scan.NameParser;
 
 class MatchingTest {
 
+    /** These tests only pair libraries; their content is never read. */
+    private static final LibraryRef.ContentSource NO_CONTENT = new LibraryRef.ContentSource() {
+        @Override
+        public void forEach(io.jartree.scan.ZipUtil.EntryVisitor visitor) {
+        }
+
+        @Override
+        public Map<String, byte[]> read(Set<String> names) {
+            return Map.of();
+        }
+
+        @Override
+        public LibraryRef.EntryReader reader() {
+            return new LibraryRef.EntryReader() {
+                @Override
+                public byte[] read(String name) {
+                    return null;
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+        }
+    };
+
     private static LibraryRef lib(String path, String sha) {
         String file = path.substring(path.lastIndexOf('/') + 1);
         NameParser.ParsedName p = NameParser.parse(file);
         return new LibraryRef(path, LibraryRef.Kind.ARCHIVE, p.name(), p.version(), p.extension(), null, null,
-                sha + "0".repeat(64 - sha.length()), 0, 0, 0, Set.of(), Map::of);
+                sha + "0".repeat(64 - sha.length()), 0, 0, 0, Set.of(), NO_CONTENT);
     }
 
     @Test

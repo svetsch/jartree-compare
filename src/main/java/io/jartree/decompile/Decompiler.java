@@ -3,6 +3,7 @@ package io.jartree.decompile;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,12 +47,35 @@ public final class Decompiler {
     public record Result(Map<String, String> sources, List<String> errors) {
     }
 
+    /** The classes of a library, read on demand so that a large library is not held in memory. */
+    public interface ClassSource {
+        /** Internal names ("com/acme/Foo") of the classes that can be resolved. */
+        Collection<String> names();
+
+        /** Class bytes, or null when absent. */
+        byte[] bytes(String internalName);
+
+        static ClassSource of(Map<String, byte[]> classes) {
+            return new ClassSource() {
+                @Override
+                public Collection<String> names() {
+                    return classes.keySet();
+                }
+
+                @Override
+                public byte[] bytes(String internalName) {
+                    return classes.get(internalName);
+                }
+            };
+        }
+    }
+
     /**
      * @param classes internal class name (without {@code .class}) to bytes; these are decompiled
      * @param context other classes of the same library, used to resolve types (may overlap {@code classes})
      * @return top-level internal class name to Java source. Inner classes are part of their outer class' source.
      */
-    public Result decompile(String name, Map<String, byte[]> classes, Map<String, byte[]> context) {
+    public Result decompile(String name, Map<String, byte[]> classes, ClassSource context) {
         Map<String, String> sources = new ConcurrentHashMap<>();
         List<String> errors = new ArrayList<>();
         if (classes.isEmpty()) {
@@ -76,11 +100,11 @@ public final class Decompiler {
         return new Result(sources, errors);
     }
 
-    private static void run(String name, Map<String, byte[]> classes, Map<String, byte[]> context,
+    private static void run(String name, Map<String, byte[]> classes, ClassSource context,
                             Map<String, Object> options, Map<String, String> sources, List<String> errors) {
         Fernflower fernflower = new Fernflower(NoopSaver.INSTANCE, options, new CollectingLogger(errors));
         try {
-            fernflower.addSource(new MemorySource(name, classes, sources));
+            fernflower.addSource(new MemorySource(name, ClassSource.of(classes), sources));
             fernflower.addLibrary(new MemorySource(name + " (context)", context, null));
             fernflower.decompileContext();
         } catch (RuntimeException | StackOverflowError e) {
@@ -94,10 +118,10 @@ public final class Decompiler {
 
     private static final class MemorySource implements IContextSource {
         private final String name;
-        private final Map<String, byte[]> classes;
+        private final ClassSource classes;
         private final Map<String, String> output;
 
-        MemorySource(String name, Map<String, byte[]> classes, Map<String, String> output) {
+        MemorySource(String name, ClassSource classes, Map<String, String> output) {
             this.name = name;
             this.classes = classes;
             this.output = output;
@@ -110,18 +134,18 @@ public final class Decompiler {
 
         @Override
         public Entries getEntries() {
-            List<Entry> entries = classes.keySet().stream().sorted().map(Entry::atBase).toList();
+            List<Entry> entries = classes.names().stream().sorted().map(Entry::atBase).toList();
             return new Entries(entries, List.of(), List.of());
         }
 
         @Override
         public byte[] getClassBytes(String className) {
-            return classes.get(className);
+            return classes.bytes(className);
         }
 
         @Override
         public boolean hasClass(String className) {
-            return classes.containsKey(className);
+            return classes.bytes(className) != null;
         }
 
         @Override
@@ -129,7 +153,7 @@ public final class Decompiler {
             if (!resource.endsWith(CLASS_SUFFIX)) {
                 return null;
             }
-            byte[] bytes = classes.get(resource.substring(0, resource.length() - CLASS_SUFFIX.length()));
+            byte[] bytes = classes.bytes(resource.substring(0, resource.length() - CLASS_SUFFIX.length()));
             return bytes == null ? null : new ByteArrayInputStream(bytes);
         }
 

@@ -12,10 +12,25 @@ public final class LibraryRef {
 
     public enum Kind { ARCHIVE, NESTED_ARCHIVE, DIRECTORY }
 
-    @FunctionalInterface
-    public interface ContentLoader {
-        /** Loads all entries (path to bytes), excluding directories and nested libraries. */
-        Map<String, byte[]> load() throws IOException;
+    /** Reads single entries repeatedly, keeping the archive open in between. */
+    public interface EntryReader extends AutoCloseable {
+        /** The entry content, or null when the archive has no such entry. */
+        byte[] read(String name) throws IOException;
+
+        @Override
+        void close() throws IOException;
+    }
+
+    /** Reads the content of a library without holding the whole archive in memory. */
+    public interface ContentSource {
+        /** Visits every entry, one at a time. */
+        void forEach(ZipUtil.EntryVisitor visitor) throws IOException;
+
+        /** Reads only the named entries. */
+        Map<String, byte[]> read(Set<String> names) throws IOException;
+
+        /** Opens the archive for repeated single-entry reads; close it when done. */
+        EntryReader reader() throws IOException;
     }
 
     private final String path;
@@ -30,11 +45,11 @@ public final class LibraryRef {
     private final int entryCount;
     private final int classCount;
     private final Set<String> nestedLibraries;
-    private final ContentLoader loader;
+    private final ContentSource source;
 
     public LibraryRef(String path, Kind kind, String name, String version, String extension, String mavenGa,
                       String mavenVersion, String sha256, long size, int entryCount, int classCount,
-                      Set<String> nestedLibraries, ContentLoader loader) {
+                      Set<String> nestedLibraries, ContentSource source) {
         this.path = path;
         this.kind = kind;
         this.name = name;
@@ -47,7 +62,7 @@ public final class LibraryRef {
         this.entryCount = entryCount;
         this.classCount = classCount;
         this.nestedLibraries = Set.copyOf(nestedLibraries);
-        this.loader = loader;
+        this.source = source;
     }
 
     /** Path relative to the scanned root; nested archives use {@code outer.war!/WEB-INF/lib/inner.jar}. */
@@ -108,8 +123,30 @@ public final class LibraryRef {
         return nestedLibraries;
     }
 
+    /** Visits every entry except the nested libraries, which are compared on their own. */
+    public void forEachEntry(ZipUtil.EntryVisitor visitor) throws IOException {
+        source.forEach((name, content) -> {
+            if (!nestedLibraries.contains(name)) {
+                visitor.visit(name, content);
+            }
+        });
+    }
+
+    /** Reads the named entries; only these are held in memory. */
+    public Map<String, byte[]> readEntries(Set<String> names) throws IOException {
+        return source.read(names);
+    }
+
+    /** Opens this library for repeated single-entry reads. */
+    public EntryReader reader() throws IOException {
+        return source.reader();
+    }
+
+    /** All entries at once; only for small libraries and tests. */
     public Map<String, byte[]> loadEntries() throws IOException {
-        return loader.load();
+        Map<String, byte[]> entries = new java.util.TreeMap<>();
+        forEachEntry(entries::put);
+        return entries;
     }
 
     /** Directory part of {@link #path()} (including a trailing separator) or empty. */

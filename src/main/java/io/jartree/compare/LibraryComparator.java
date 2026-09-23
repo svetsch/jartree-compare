@@ -1,7 +1,9 @@
 package io.jartree.compare;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
@@ -21,6 +23,7 @@ import io.jartree.bytecode.MemberChange;
 import io.jartree.compare.ClassChange.Nature;
 import io.jartree.decompile.Decompiler;
 import io.jartree.scan.LibraryRef;
+import io.jartree.scan.ZipUtil;
 
 /** Compares the content of two versions of a library entry by entry and decompiles changed classes. */
 final class LibraryComparator {
@@ -87,18 +90,23 @@ final class LibraryComparator {
         LibraryDiff diff = new LibraryDiff(o, n, pair.matchedBy(), LibraryStatus.CHANGED);
         try {
             long t = System.nanoTime();
-            Map<String, byte[]> oldEntries = o.loadEntries();
-            Map<String, byte[]> newEntries = n.loadEntries();
+            // digest both sides while streaming them, so that a large archive is never held in memory
+            Map<String, String> oldIndex = index(o);
+            Map<String, String> newIndex = index(n);
+            int ignored = removeIgnored(oldIndex) + removeIgnored(newIndex);
+            Set<String> names = needed(oldIndex, newIndex);
+            Map<String, byte[]> oldEntries = o.readEntries(intersect(names, oldIndex.keySet()));
+            Map<String, byte[]> newEntries = n.readEntries(intersect(names, newIndex.keySet()));
             timings.since(Timings.Phase.UNCOMPRESS, t);
             long compareStart = System.nanoTime();
-            int ignored = removeIgnored(oldEntries) + removeIgnored(newEntries);
+            diff.identicalEntries = identical(oldIndex, newIndex);
             if (ignored > 0) {
                 diff.notes.add(ignored + " entr" + (ignored == 1 ? "y" : "ies") + " ignored by the 'Ignore entries' patterns");
             }
             Map<String, ClassEntry> oldClasses = extractClasses(oldEntries);
             Map<String, ClassEntry> newClasses = extractClasses(newEntries);
             compareResources(diff, oldEntries, newEntries);
-            long decompileNanos = compareClasses(diff, oldClasses, newClasses);
+            long decompileNanos = compareClasses(diff, o, n, oldIndex, newIndex, oldClasses, newClasses);
             addNestedLibraryNotes(diff);
             // decompilation, diffing and cache access are recorded as their own phases
             timings.since(Timings.Phase.COMPARE, compareStart + decompileNanos);
@@ -113,6 +121,13 @@ final class LibraryComparator {
                 cache.putLibrary(cacheKey, diff);
                 timings.since(Timings.Phase.CACHE, c);
             }
+        } catch (OutOfMemoryError e) {
+            // free what this library holds and report it instead of failing the whole comparison
+            diff.classes.clear();
+            diff.resources.clear();
+            diff.status = LibraryStatus.ERROR;
+            diff.error = "Out of memory while comparing this library. Give the JVM more heap, for example "
+                    + "-Xmx8g, or exclude this library.";
         } catch (Exception | StackOverflowError e) {
             diff.status = LibraryStatus.ERROR;
             diff.error = e.toString();
@@ -124,8 +139,69 @@ final class LibraryComparator {
         return diff;
     }
 
+    /** Digest of every entry of a library, read one entry at a time. */
+    private static Map<String, String> index(LibraryRef library) throws IOException {
+        Map<String, String> index = new TreeMap<>();
+        library.forEachEntry((name, content) -> index.put(name, ZipUtil.sha256(content)));
+        return index;
+    }
+
+    private static int identical(Map<String, String> oldIndex, Map<String, String> newIndex) {
+        int identical = 0;
+        for (var e : oldIndex.entrySet()) {
+            if (e.getValue().equals(newIndex.get(e.getKey()))) {
+                identical++;
+            }
+        }
+        return identical;
+    }
+
+    /**
+     * Entries whose content is needed: those that differ or exist on one side only, plus the other class files
+     * of their top-level class, which are decompiled together.
+     */
+    private static Set<String> needed(Map<String, String> oldIndex, Map<String, String> newIndex) {
+        Set<String> needed = new TreeSet<>();
+        Set<String> groups = new TreeSet<>();
+        Set<String> all = new TreeSet<>(oldIndex.keySet());
+        all.addAll(newIndex.keySet());
+        for (String name : all) {
+            String oldSha = oldIndex.get(name);
+            String newSha = newIndex.get(name);
+            if (oldSha != null && oldSha.equals(newSha)) {
+                continue;
+            }
+            needed.add(name);
+            if (isClassFile(name)) {
+                groups.add(pathGroup(name));
+            }
+        }
+        if (!groups.isEmpty()) {
+            for (String name : all) {
+                if (isClassFile(name) && groups.contains(pathGroup(name))) {
+                    needed.add(name);
+                }
+            }
+        }
+        return needed;
+    }
+
+    private static Set<String> intersect(Set<String> names, Set<String> available) {
+        Set<String> result = new TreeSet<>(names);
+        result.retainAll(available);
+        return result;
+    }
+
+    /** Entry path of the top-level class of a class file, used to group inner classes without reading them. */
+    private static String pathGroup(String path) {
+        String withoutSuffix = path.substring(0, path.length() - ".class".length());
+        int slash = withoutSuffix.lastIndexOf('/');
+        int dollar = withoutSuffix.indexOf('$', slash + 2);
+        return dollar < 0 ? withoutSuffix : withoutSuffix.substring(0, dollar);
+    }
+
     /** Removes entries matching the ignore patterns (full entry path, or file name for patterns without '/'). */
-    private int removeIgnored(Map<String, byte[]> entries) {
+    private int removeIgnored(Map<String, ?> entries) {
         if (ignoredEntries.isEmpty()) {
             return 0;
         }
@@ -154,7 +230,6 @@ final class LibraryComparator {
             byte[] a = oldEntries.get(path);
             byte[] b = newEntries.get(path);
             if (a != null && b != null && Arrays.equals(a, b)) {
-                diff.identicalEntries++;
                 continue;
             }
             ChangeType type = a == null ? ChangeType.ADDED : b == null ? ChangeType.REMOVED : ChangeType.MODIFIED;
@@ -214,7 +289,9 @@ final class LibraryComparator {
     }
 
     /** @return nanoseconds spent in decompilation (including its diffs and cache access) */
-    private long compareClasses(LibraryDiff diff, Map<String, ClassEntry> oldClasses, Map<String, ClassEntry> newClasses) {
+    private long compareClasses(LibraryDiff diff, LibraryRef oldLib, LibraryRef newLib,
+                                Map<String, String> oldIndex, Map<String, String> newIndex,
+                                Map<String, ClassEntry> oldClasses, Map<String, ClassEntry> newClasses) {
         Map<String, Group> groups = new TreeMap<>();
         // classes outside the package filter are skipped here but stay available as decompiler context
         for (ClassEntry c : oldClasses.values()) {
@@ -240,8 +317,6 @@ final class LibraryComparator {
             for (String name : names) {
                 if (!Arrays.equals(g.oldFiles.get(name), g.newFiles.get(name))) {
                     changedFiles.add(g.prefix + name + ".class");
-                } else {
-                    diff.identicalEntries++;
                 }
             }
             if (changedFiles.isEmpty()) {
@@ -288,12 +363,17 @@ final class LibraryComparator {
             return 0;
         }
         long t = System.nanoTime();
-        decompileGroups(diff, toDecompile, oldClasses, newClasses);
+        try (ArchiveClasses oldContext = new ArchiveClasses(oldLib, oldIndex, oldClasses);
+             ArchiveClasses newContext = new ArchiveClasses(newLib, newIndex, newClasses)) {
+            decompileGroups(diff, toDecompile, oldContext, newContext);
+        } catch (IOException e) {
+            diff.notes.add("Could not read the library for decompilation: " + e.getMessage());
+        }
         return System.nanoTime() - t;
     }
 
-    private void decompileGroups(LibraryDiff diff, List<Group> groups, Map<String, ClassEntry> oldClasses,
-                                 Map<String, ClassEntry> newClasses) {
+    private void decompileGroups(LibraryDiff diff, List<Group> groups, ArchiveClasses oldClasses,
+                                 ArchiveClasses newClasses) {
         Map<Group, String> oldSources = new IdentityHashMap<>();
         Map<Group, String> newSources = new IdentityHashMap<>();
         List<String> errors = new ArrayList<>();
@@ -348,7 +428,7 @@ final class LibraryComparator {
 
     /** Decompiles one side of the groups, reusing cached sources where the class files are unchanged. */
     private void decompileSide(String libPath, String prefix, List<Group> groups, boolean oldSide,
-                               Map<String, ClassEntry> allClasses, Map<Group, String> out, List<String> errors) {
+                               ArchiveClasses allClasses, Map<Group, String> out, List<String> errors) {
         List<Group> missing = new ArrayList<>();
         Map<Group, String> keys = new IdentityHashMap<>();
         for (Group g : groups) {
@@ -376,17 +456,7 @@ final class LibraryComparator {
         for (Group g : missing) {
             sources.putAll(oldSide ? g.oldFiles : g.newFiles);
         }
-        // context: classes under the same prefix take precedence over classes of other roots
-        Map<String, byte[]> context = new HashMap<>();
-        for (ClassEntry c : allClasses.values()) {
-            if (c.prefix().equals(prefix)) {
-                context.put(c.internalName(), c.bytes());
-            }
-        }
-        for (ClassEntry c : allClasses.values()) {
-            context.putIfAbsent(c.internalName(), c.bytes());
-        }
-        Decompiler.Result result = decompiler.decompile(libPath + "!/" + prefix, sources, context);
+        Decompiler.Result result = decompiler.decompile(libPath + "!/" + prefix, sources, allClasses);
         errors.addAll(result.errors());
         for (Group g : missing) {
             String source = sourceOf(g, result.sources());
@@ -400,6 +470,76 @@ final class LibraryComparator {
                 cache.putSource(keys.get(g), source);
                 timings.since(Timings.Phase.CACHE, c);
             }
+        }
+    }
+
+    /**
+     * The classes of one library, for the decompiler to resolve types with: the ones already read are served
+     * from memory, the others are read from the archive on demand.
+     */
+    private static final class ArchiveClasses implements Decompiler.ClassSource, AutoCloseable {
+        private static final List<String> ROOTS = List.of("", "WEB-INF/classes/", "BOOT-INF/classes/");
+
+        private final Map<String, byte[]> loaded = new HashMap<>();
+        private final Map<String, String> pathByName = new HashMap<>();
+        private final LibraryRef.EntryReader reader;
+
+        ArchiveClasses(LibraryRef library, Map<String, String> index, Map<String, ClassEntry> known)
+                throws IOException {
+            for (ClassEntry c : known.values()) {
+                loaded.put(c.internalName(), c.bytes());
+            }
+            for (String path : index.keySet()) {
+                if (isClassFile(path)) {
+                    pathByName.putIfAbsent(internalNameOf(path), path);
+                }
+            }
+            known.forEach((path, c) -> pathByName.put(c.internalName(), path));
+            this.reader = library.reader();
+        }
+
+        /** Class name from an entry path, by stripping the usual roots; exact names are added separately. */
+        private static String internalNameOf(String path) {
+            String p = path.substring(0, path.length() - ".class".length());
+            if (p.startsWith("META-INF/versions/")) {
+                int slash = p.indexOf('/', "META-INF/versions/".length());
+                if (slash > 0) {
+                    p = p.substring(slash + 1);
+                }
+            }
+            for (String root : ROOTS) {
+                if (!root.isEmpty() && p.startsWith(root)) {
+                    return p.substring(root.length());
+                }
+            }
+            return p;
+        }
+
+        @Override
+        public Collection<String> names() {
+            return pathByName.keySet();
+        }
+
+        @Override
+        public byte[] bytes(String internalName) {
+            byte[] bytes = loaded.get(internalName);
+            if (bytes != null) {
+                return bytes;
+            }
+            String path = pathByName.get(internalName);
+            if (path == null) {
+                return null;
+            }
+            try {
+                return reader.read(path);
+            } catch (IOException e) {
+                return null;
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            reader.close();
         }
     }
 

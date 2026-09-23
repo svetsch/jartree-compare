@@ -150,8 +150,21 @@ public final class ResultReader {
         String path = str(m.get("path"));
         String extension = m.get("extension") != null ? str(m.get("extension"))
                 : NameParser.parse(path.substring(path.lastIndexOf('/') + 1)).extension();
-        LibraryRef.ContentLoader unavailable = () -> {
-            throw new IOException("Content of " + path + " is not available in a loaded report");
+        LibraryRef.ContentSource unavailable = new LibraryRef.ContentSource() {
+            @Override
+            public void forEach(io.jartree.scan.ZipUtil.EntryVisitor visitor) throws IOException {
+                throw new IOException("Content of " + path + " is not available in a loaded report");
+            }
+
+            @Override
+            public Map<String, byte[]> read(Set<String> names) throws IOException {
+                throw new IOException("Content of " + path + " is not available in a loaded report");
+            }
+
+            @Override
+            public LibraryRef.EntryReader reader() throws IOException {
+                throw new IOException("Content of " + path + " is not available in a loaded report");
+            }
         };
         return new LibraryRef(path, LibraryRef.Kind.valueOf(str(m.get("kind"))), str(m.get("name")),
                 (String) m.get("version"), extension, (String) m.get("maven"), (String) m.get("mavenVersion"),

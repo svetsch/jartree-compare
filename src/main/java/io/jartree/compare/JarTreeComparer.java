@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -74,6 +75,8 @@ public final class JarTreeComparer {
 
         // entry comparison runs per library in parallel; decompilation is serialized and uses all threads itself
         int parallelLibraries = Math.max(1, Math.min(options.threads(), differing.size()));
+        // large libraries take more of the heap, so they take more of the budget and run less in parallel
+        Semaphore memory = new Semaphore(Math.max(1, options.threads()));
         LibraryComparator comparator = new LibraryComparator(options,
                 new Decompiler(options.threads(), options.maxSecondsPerMethod(), timings), cache, timings);
 
@@ -92,7 +95,14 @@ public final class JarTreeComparer {
                     continue;
                 }
                 futures.add(pool.submit(() -> {
-                    LibraryDiff diff = comparator.compare(pair);
+                    int weight = memoryWeight(pair, options.threads());
+                    memory.acquire(weight);
+                    LibraryDiff diff;
+                    try {
+                        diff = comparator.compare(pair);
+                    } finally {
+                        memory.release(weight);
+                    }
                     int count = done.incrementAndGet();
                     progress.message("[" + count + "/" + differing.size() + "] " + diff.status() + " "
                             + diff.primary().path() + (diff.fromCache() ? "  (cached)" : ""));
@@ -107,6 +117,10 @@ public final class JarTreeComparer {
             Thread.currentThread().interrupt();
             throw new IOException("Interrupted", e);
         } catch (ExecutionException e) {
+            if (e.getCause() instanceof OutOfMemoryError) {
+                throw new IOException("Out of memory. Give the JVM more heap (for example -Xmx8g) or compare "
+                        + "fewer libraries at once with --include, --exclude or --threads 1.", e.getCause());
+            }
             throw new IOException("Comparison failed", e.getCause());
         } finally {
             pool.shutdownNow();
@@ -115,6 +129,14 @@ public final class JarTreeComparer {
         Duration elapsed = Duration.between(started, Instant.now());
         return new ComparisonResult(oldRoot, newRoot, oldLibs.size(), newLibs.size(), results, warnings,
                 started, elapsed, limits(results, scanner), timings.summary(elapsed.toMillis()));
+    }
+
+    /** Budget of a library pair: one unit per 64 MB of archive, so that big pairs do not run side by side. */
+    private static int memoryWeight(LibraryMatcher.Pair pair, int threads) {
+        long size = Math.max(pair.oldLib() == null ? 0 : pair.oldLib().size(),
+                pair.newLib() == null ? 0 : pair.newLib().size());
+        long units = size / (64L * 1024 * 1024) + 1;
+        return (int) Math.min(Math.max(1, threads), units);
     }
 
     private Limits limits(List<LibraryDiff> results, TreeScanner scanner) {

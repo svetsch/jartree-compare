@@ -18,6 +18,7 @@ jartree-compare old-release/ new-release/ --html report.html
 - [How it works](#how-it-works)
 - [Cache](#cache)
 - [Limits and timings](#limits-and-timings)
+- [Memory](#memory)
 - [Reports](#reports)
 - [Native executable](#native-executable)
 - [Development](#development)
@@ -221,6 +222,20 @@ it off with the *Use cache* option or `--no-cache`.
   more than the elapsed time. *Decompile wait* is time libraries spent queued for the decompiler, which runs
   one library at a time. The JSON report contains the same numbers and the slowest libraries.
 
+## Memory
+
+Archives are never held in memory as a whole:
+
+- **Scanning** streams each archive entry by entry and hashes files while reading them.
+- **Comparing** digests both sides while streaming, then reads only the entries that differ (plus the other
+  class files of a changed class, which are decompiled together). Unchanged resources — usually the bulk of a
+  war — are never decompressed into memory.
+- **Decompiling** resolves types by reading classes from the archive on demand, instead of keeping all of them.
+- **Parallelism** is budgeted by archive size: one unit per 64 MB, so large libraries do not run side by side.
+
+A pair of 140 MB wars compares in a 256 MB heap; the default heap of the launchers (`-Xmx4g`) is enough for
+large trees.
+
 ## Reports
 
 | Report | Contents |
@@ -297,7 +312,7 @@ git-commit-id Maven plugin; a build without a git checkout reports `unknown`.
 |---|---|
 | `Unsupported JavaFX configuration: classes were loaded from 'unnamed module'` | The single jar loads JavaFX from the class path. Harmless, and the message is filtered out. |
 | The GUI does not start on another operating system | The shaded jar contains the JavaFX binaries of the platform it was built on. Build it there, or use `mvn javafx:run`. |
-| `OutOfMemoryError` on very large trees | Raise the heap: `JAVA_OPTS=-Xmx8g` (the launchers pass it on) or `java -Xmx8g -jar …`. |
+| `OutOfMemoryError` on very large trees | Raise the heap (`JAVA_OPTS=-Xmx8g`, or `java -Xmx8g -jar …`), or lower `--threads`. A single library that does not fit is reported as `error` and the other libraries are still compared. |
 | Many classes reported as changed with identical source | A different compiler or compiler version. They are marked `bytecode only` and do not count as source changes. |
 | Excluding `META-INF/MANIFEST.MF` has no effect | `--exclude` filters libraries; use `--ignore-entry` for files inside libraries. |
 | Stack traces wanted for errors | Set `JARTREE_DEBUG=1`. |

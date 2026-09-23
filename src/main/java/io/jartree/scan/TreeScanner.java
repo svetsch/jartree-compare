@@ -2,9 +2,11 @@ package io.jartree.scan;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.lang.ref.SoftReference;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -22,6 +24,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 /**
  * Walks a directory tree (or a single archive) and collects every library in it, descending into nested archives
@@ -29,9 +33,132 @@ import java.util.stream.Stream;
  */
 public final class TreeScanner {
 
-    @FunctionalInterface
-    private interface ByteSupplier {
-        byte[] get() throws IOException;
+    /** An archive file: entries are read from the central directory when needed. */
+    private record FileSource(Path file) implements LibraryRef.ContentSource {
+        @Override
+        public void forEach(ZipUtil.EntryVisitor visitor) throws IOException {
+            ZipUtil.forEachEntry(file, visitor);
+        }
+
+        @Override
+        public Map<String, byte[]> read(Set<String> names) throws IOException {
+            return ZipUtil.readEntries(file, names);
+        }
+
+        @Override
+        public LibraryRef.EntryReader reader() throws IOException {
+            ZipFile zip = new ZipFile(file.toFile());
+            return new LibraryRef.EntryReader() {
+                @Override
+                public byte[] read(String name) throws IOException {
+                    ZipEntry entry = zip.getEntry(name);
+                    if (entry == null || entry.isDirectory()) {
+                        return null;
+                    }
+                    try (InputStream in = zip.getInputStream(entry)) {
+                        return in.readAllBytes();
+                    }
+                }
+
+                @Override
+                public void close() throws IOException {
+                    zip.close();
+                }
+            };
+        }
+    }
+
+    /**
+     * An archive inside another archive. Its bytes are extracted from the parent when needed and kept only
+     * softly, so that memory can be reclaimed between uses.
+     */
+    private static final class NestedSource implements LibraryRef.ContentSource {
+        private final LibraryRef.ContentSource parent;
+        private final String entry;
+        private SoftReference<byte[]> cached;
+
+        NestedSource(LibraryRef.ContentSource parent, String entry, byte[] bytes) {
+            this.parent = parent;
+            this.entry = entry;
+            this.cached = new SoftReference<>(bytes);
+        }
+
+        private synchronized byte[] bytes() throws IOException {
+            byte[] bytes = cached.get();
+            if (bytes == null) {
+                bytes = parent.read(Set.of(entry)).get(entry);
+                if (bytes == null) {
+                    throw new IOException("Nested entry vanished: " + entry);
+                }
+                cached = new SoftReference<>(bytes);
+            }
+            return bytes;
+        }
+
+        @Override
+        public void forEach(ZipUtil.EntryVisitor visitor) throws IOException {
+            ZipUtil.forEachEntry(bytes(), visitor);
+        }
+
+        @Override
+        public Map<String, byte[]> read(Set<String> names) throws IOException {
+            return ZipUtil.readEntries(bytes(), names);
+        }
+
+        @Override
+        public LibraryRef.EntryReader reader() throws IOException {
+            // nested archives are small: index them once for the duration of the session
+            Map<String, byte[]> entries = new TreeMap<>();
+            ZipUtil.forEachEntry(bytes(), entries::put);
+            return new LibraryRef.EntryReader() {
+                @Override
+                public byte[] read(String name) {
+                    return entries.get(name);
+                }
+
+                @Override
+                public void close() {
+                    entries.clear();
+                }
+            };
+        }
+    }
+
+    /** An exploded directory. */
+    private record DirectorySource(Path dir, List<Path> files) implements LibraryRef.ContentSource {
+        @Override
+        public void forEach(ZipUtil.EntryVisitor visitor) throws IOException {
+            for (Path f : files) {
+                visitor.visit(relative(dir, f), Files.readAllBytes(f));
+            }
+        }
+
+        @Override
+        public Map<String, byte[]> read(Set<String> names) throws IOException {
+            Map<String, byte[]> result = new TreeMap<>();
+            for (Path f : files) {
+                String name = relative(dir, f);
+                if (names.contains(name)) {
+                    result.put(name, Files.readAllBytes(f));
+                }
+            }
+            return result;
+        }
+
+        @Override
+        public LibraryRef.EntryReader reader() {
+            return new LibraryRef.EntryReader() {
+                @Override
+                public byte[] read(String name) throws IOException {
+                    Path f = dir.resolve(name);
+                    return Files.isRegularFile(f) ? Files.readAllBytes(f) : null;
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+        }
     }
 
     private static final Pattern POM_PROPERTIES = Pattern.compile("META-INF/maven/([^/]+)/([^/]+)/pom\\.properties");
@@ -77,8 +204,7 @@ public final class TreeScanner {
     public List<LibraryRef> scan(Path root) throws IOException {
         ConcurrentLinkedQueue<LibraryRef> out = new ConcurrentLinkedQueue<>();
         if (Files.isRegularFile(root)) {
-            String name = root.getFileName().toString();
-            scanArchive(name, LibraryRef.Kind.ARCHIVE, () -> Files.readAllBytes(root), Files.readAllBytes(root), 0, out);
+            scanFile(root.getFileName().toString(), root, out);
         } else if (Files.isDirectory(root)) {
             List<Path> archives = new ArrayList<>();
             List<Path> dirLibraries = new ArrayList<>();
@@ -94,14 +220,7 @@ public final class TreeScanner {
                     }
                 });
             }
-            archives.parallelStream().forEach(p -> {
-                String rel = relative(root, p);
-                try {
-                    scanArchive(rel, LibraryRef.Kind.ARCHIVE, () -> Files.readAllBytes(p), Files.readAllBytes(p), 0, out);
-                } catch (IOException e) {
-                    warn("Cannot read " + rel + ": " + e.getMessage());
-                }
-            });
+            archives.parallelStream().forEach(p -> scanFile(relative(root, p), p, out));
             for (Path dir : dirLibraries) {
                 scanDirectory(root, dir, dirLibraries, out);
             }
@@ -113,35 +232,44 @@ public final class TreeScanner {
         return result;
     }
 
-    private void scanArchive(String path, LibraryRef.Kind kind, ByteSupplier supplier, byte[] data, int depth,
-                             ConcurrentLinkedQueue<LibraryRef> out) {
+    private void scanFile(String path, Path file, ConcurrentLinkedQueue<LibraryRef> out) {
+        try {
+            scanArchive(path, LibraryRef.Kind.ARCHIVE, new FileSource(file), ZipUtil.sha256(file), Files.size(file),
+                    0, out);
+        } catch (IOException e) {
+            warn("Cannot read " + path + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Collects one library and, recursively, the archives nested in it. The archive is streamed entry by entry;
+     * only the bytes of the entry being visited are held.
+     */
+    private void scanArchive(String path, LibraryRef.Kind kind, LibraryRef.ContentSource source, String sha,
+                             long size, int depth, ConcurrentLinkedQueue<LibraryRef> out) {
         Set<String> nested = new TreeSet<>();
         List<String[]> poms = new ArrayList<>();
         int[] counts = new int[2];
         try {
-            ZipUtil.forEachEntry(data, (name, content) -> {
+            source.forEach((name, content) -> {
                 counts[0]++;
                 if (name.endsWith(".class")) {
                     counts[1]++;
                 }
-                if (depth < maxDepth && isArchiveName(name)) {
-                    nested.add(name);
-                    ByteSupplier nestedSupplier = () -> {
-                        byte[] bytes = ZipUtil.extract(supplier.get(), name);
-                        if (bytes == null) {
-                            throw new IOException("Nested entry vanished: " + name);
-                        }
-                        return bytes;
-                    };
-                    scanArchive(path + "!/" + name, LibraryRef.Kind.NESTED_ARCHIVE, nestedSupplier, content, depth + 1, out);
-                    return;
-                }
                 if (isArchiveName(name)) {
-                    // not opened: remember how deep the limit would have to be to open it and what it contains
-                    depthNeeded.accumulateAndGet(depth + 1 + nesting(content, 0), Math::max);
-                    synchronized (unopened) {
-                        unopened.add(path + "!/" + name);
+                    if (depth < maxDepth) {
+                        nested.add(name);
+                        scanArchive(path + "!/" + name, LibraryRef.Kind.NESTED_ARCHIVE,
+                                new NestedSource(source, name, content), ZipUtil.sha256(content), content.length,
+                                depth + 1, out);
+                    } else {
+                        // not opened: remember how deep the limit would have to be to open it and what it contains
+                        depthNeeded.accumulateAndGet(depth + 1 + nesting(content, 0), Math::max);
+                        synchronized (unopened) {
+                            unopened.add(path + "!/" + name);
+                        }
                     }
+                    return;
                 }
                 Matcher m = POM_PROPERTIES.matcher(name);
                 if (m.matches()) {
@@ -160,19 +288,9 @@ public final class TreeScanner {
         String fileName = path.substring(path.lastIndexOf('/') + 1);
         NameParser.ParsedName parsed = NameParser.parse(fileName);
         String[] pom = selectPom(poms, parsed.name());
-        Set<String> nestedCopy = Set.copyOf(nested);
-        LibraryRef.ContentLoader loader = () -> {
-            Map<String, byte[]> entries = new TreeMap<>();
-            ZipUtil.forEachEntry(supplier.get(), (name, content) -> {
-                if (!nestedCopy.contains(name)) {
-                    entries.put(name, content);
-                }
-            });
-            return entries;
-        };
         out.add(new LibraryRef(path, kind, parsed.name(), parsed.version(), parsed.extension(),
                 pom == null ? null : pom[0] + ":" + pom[1], pom == null ? null : pom[2],
-                ZipUtil.sha256(data), data.length, counts[0], counts[1], nested, loader));
+                sha, size, counts[0], counts[1], nested, source));
     }
 
     /** How many levels of archives are nested inside the given archive (0 if none). */
@@ -226,28 +344,19 @@ public final class TreeScanner {
         long size = 0;
         int classes = 0;
         for (Path f : files) {
-            byte[] content = Files.readAllBytes(f);
-            size += content.length;
+            size += Files.size(f);
             if (f.getFileName().toString().endsWith(".class")) {
                 classes++;
             }
             md.update(relative(dir, f).getBytes(StandardCharsets.UTF_8));
             md.update((byte) 0);
-            md.update(ZipUtil.sha256(content).getBytes(StandardCharsets.US_ASCII));
+            md.update(ZipUtil.sha256(f).getBytes(StandardCharsets.US_ASCII));
             md.update((byte) '\n');
         }
-        LibraryRef.ContentLoader loader = () -> {
-            Map<String, byte[]> entries = new TreeMap<>();
-            try {
-                files.forEach(f -> entries.put(relative(dir, f), ZipUtil.readFile(f)));
-            } catch (UncheckedIOException e) {
-                throw e.getCause();
-            }
-            return entries;
-        };
         NameParser.ParsedName parsed = NameParser.parse(dir.getFileName().toString());
         out.add(new LibraryRef(rel, LibraryRef.Kind.DIRECTORY, parsed.name(), parsed.version(), parsed.extension(),
-                null, null, HexFormat.of().formatHex(md.digest()), size, files.size(), classes, nested, loader));
+                null, null, HexFormat.of().formatHex(md.digest()), size, files.size(), classes, nested,
+                new DirectorySource(dir, List.copyOf(files))));
     }
 
     private boolean isArchiveName(String name) {
