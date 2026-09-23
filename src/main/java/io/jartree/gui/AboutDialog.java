@@ -58,6 +58,7 @@ final class AboutDialog {
         grid.addRow(row++, muted("Java"), mono(System.getProperty("java.version") + "  ·  "
                 + System.getProperty("java.vendor")));
         grid.addRow(row++, muted("JavaFX"), mono(System.getProperty("javafx.runtime.version", "unknown")));
+        grid.addRow(row++, muted("License"), mono("MIT"));
         Hyperlink repository = new Hyperlink(BuildInfo.REPOSITORY);
         repository.setOnAction(e -> open(hostServices, BuildInfo.REPOSITORY));
         grid.addRow(row, muted("Project"), repository);

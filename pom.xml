@@ -10,6 +10,14 @@
     <name>jartree-compare</name>
     <url>https://github.com/svetsch/jartree-compare</url>
 
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <scm>
         <connection>scm:git:https://github.com/svetsch/jartree-compare.git</connection>
         <developerConnection>scm:git:https://github.com/svetsch/jartree-compare.git</developerConnection>

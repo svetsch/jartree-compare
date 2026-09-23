@@ -21,6 +21,7 @@ jartree-compare old-release/ new-release/ --html report.html
 - [Reports](#reports)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
+- [License](#license)
 
 ## What it does
 
@@ -262,3 +263,12 @@ git-commit-id Maven plugin; a build without a git checkout reports `unknown`.
 
 Decompiled output is not the original source: minor differences can come from the decompiler itself. Changes
 are reported as source differences only when the decompiled text actually differs.
+
+## License
+
+[MIT](LICENSE) © 2026 Samuel Vetsch.
+
+The tool uses [Vineflower](https://github.com/Vineflower/vineflower) (Apache-2.0),
+[ASM](https://asm.ow2.io/) (BSD-3-Clause), [java-diff-utils](https://github.com/java-diff-utils/java-diff-utils)
+(Apache-2.0), [picocli](https://picocli.info/) (Apache-2.0) and [JavaFX](https://openjfx.io/) (GPLv2 with
+Classpath Exception); the shaded jar bundles them.
