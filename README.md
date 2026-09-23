@@ -236,6 +236,16 @@ Archives are never held in memory as a whole:
 A pair of 140 MB wars compares in a 256 MB heap; the default heap of the launchers (`-Xmx4g`) is enough for
 large trees.
 
+### Giving it more heap
+
+| Started as | How |
+|---|---|
+| `java -jar jartree-compare.jar` | `java -Xmx8g -jar jartree-compare.jar` |
+| `jartree-compare` / `.cmd` launcher | `JAVA_OPTS=-Xmx8g` (`set JAVA_OPTS=-Xmx8g` on Windows) |
+| Packaged executable (`jartree-compare.exe`) | Edit `app/jartree-compare.cfg` next to the executable and change `java-options=-Xmx4g`; do the same in `app/jartree-compare-cli.cfg` for the console launcher. Or set `_JAVA_OPTIONS=-Xmx8g` before starting it (`JAVA_TOOL_OPTIONS` is ignored here, because the built-in value wins). Or build it with the heap you want: `packaging\package.cmd app-image 8g`, `packaging/package.sh app-image 8g`, or `mvn -Pinstaller -Djpackage.xmx=8g package`. |
+
+*Help ▸ About* and `--version` show the heap the application actually runs with.
+
 ## Reports
 
 | Report | Contents |

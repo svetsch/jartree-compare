@@ -24,6 +24,17 @@ public final class BuildInfo {
     private BuildInfo() {
     }
 
+    /** Maximum heap this JVM may use, e.g. "4.0 GB"; see the README on how to change it. */
+    public static String maxHeap() {
+        long max = Runtime.getRuntime().maxMemory();
+        if (max == Long.MAX_VALUE) {
+            return "unlimited";
+        }
+        double gb = max / (1024.0 * 1024 * 1024);
+        return gb >= 1 ? String.format(java.util.Locale.ROOT, "%.1f GB", gb)
+                : String.format(java.util.Locale.ROOT, "%d MB", max / (1024 * 1024));
+    }
+
     public static boolean hasCommit() {
         return !COMMIT.equals(UNKNOWN);
     }

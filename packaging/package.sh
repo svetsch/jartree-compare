@@ -3,12 +3,14 @@
 #
 #   packaging/package.sh                 -> target/dist/jartree-compare (app image with launchers)
 #   packaging/package.sh dmg             -> installer of that type (msi/exe need WiX, deb/rpm need their tools)
+#   packaging/package.sh app-image 12g   -> same, with a 12 GB maximum heap (default 4g)
 #
 # Run "mvn package" first: the shaded jar contains the JavaFX binaries of this platform.
 set -e
 cd "$(dirname "$0")/.."
 
 TYPE="${1:-app-image}"
+HEAP="${2:-${JARTREE_XMX:-4g}}"
 JAR=target/jartree-compare.jar
 [ -f "$JAR" ] || { echo "$JAR is missing; run 'mvn package' first" >&2; exit 1; }
 
@@ -35,8 +37,8 @@ jpackage \
     --input "$INPUT" \
     --main-jar "$(basename "$JAR")" \
     --main-class io.jartree.Main \
-    --java-options "-Xmx4g" \
+    --java-options "-Xmx$HEAP" \
     --dest target/dist \
     ${ICON:+--icon "$ICON"}
 
-echo "created in target/dist"
+echo "created in target/dist with a maximum heap of $HEAP"

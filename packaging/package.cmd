@@ -3,6 +3,7 @@ rem Builds a Windows application with jpackage (JDK 17+).
 rem
 rem   packaging\package.cmd            -^> target\dist\jartree-compare\jartree-compare.exe (no installer needed)
 rem   packaging\package.cmd msi        -^> installer (needs the WiX toolset on the PATH)
+rem   packaging\package.cmd app-image 12g  -^> same, with a 12 GB maximum heap (default 4g)
 rem
 rem Run "mvn package" first: the shaded jar contains the JavaFX binaries of this platform.
 setlocal
@@ -10,6 +11,8 @@ cd /d "%~dp0.."
 
 set TYPE=%1
 if "%TYPE%"=="" set TYPE=app-image
+set HEAP=%2
+if "%HEAP%"=="" set HEAP=4g
 
 if not exist target\jartree-compare.jar (
     echo target\jartree-compare.jar is missing; run "mvn package" first
@@ -36,11 +39,12 @@ jpackage ^
     --input target\jpackage-input ^
     --main-jar jartree-compare.jar ^
     --main-class io.jartree.Main ^
-    --java-options "-Xmx4g" ^
+    --java-options "-Xmx%HEAP%" ^
     --add-launcher jartree-compare-cli=packaging\cli-launcher.properties ^
     --dest target\dist
 if errorlevel 1 exit /b 1
 
 echo.
-echo created target\dist\jartree-compare\jartree-compare.exe
+echo created target\dist\jartree-compare\jartree-compare.exe with a maximum heap of %HEAP%
+echo change it later in target\dist\jartree-compare\app\jartree-compare.cfg
 endlocal

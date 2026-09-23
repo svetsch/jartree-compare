@@ -58,6 +58,7 @@ final class AboutDialog {
         grid.addRow(row++, muted("Java"), mono(System.getProperty("java.version") + "  ·  "
                 + System.getProperty("java.vendor")));
         grid.addRow(row++, muted("JavaFX"), mono(System.getProperty("javafx.runtime.version", "unknown")));
+        grid.addRow(row++, muted("Maximum heap"), mono(BuildInfo.maxHeap()));
         grid.addRow(row++, muted("License"), mono("MIT"));
         Hyperlink repository = new Hyperlink(BuildInfo.REPOSITORY);
         repository.setOnAction(e -> open(hostServices, BuildInfo.REPOSITORY));
@@ -97,6 +98,7 @@ final class AboutDialog {
                 + "\nbranch: " + BuildInfo.BRANCH
                 + "\njava: " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor") + ")"
                 + "\njavafx: " + System.getProperty("javafx.runtime.version", "unknown")
+                + "\nmax heap: " + BuildInfo.maxHeap()
                 + "\nos: " + System.getProperty("os.name") + " " + System.getProperty("os.version");
     }
 

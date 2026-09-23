@@ -49,7 +49,9 @@ public final class Main implements Callable<Integer> {
     static final class Version implements CommandLine.IVersionProvider {
         @Override
         public String[] getVersion() {
-            return new String[] {"jartree-compare " + BuildInfo.describe(), BuildInfo.REPOSITORY};
+            return new String[] {"jartree-compare " + BuildInfo.describe(),
+                    "java " + System.getProperty("java.version") + ", max heap " + BuildInfo.maxHeap(),
+                    BuildInfo.REPOSITORY};
         }
     }
 
