@@ -19,6 +19,7 @@ jartree-compare old-release/ new-release/ --html report.html
 - [Cache](#cache)
 - [Limits and timings](#limits-and-timings)
 - [Reports](#reports)
+- [Native executable](#native-executable)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
@@ -219,6 +220,35 @@ it off with the *Use cache* option or `--no-cache`.
 | JSON (`--json`) | Full result: libraries, classes, members, resources, diffs, limits, timings. Reopen it with `--gui report.json` or *File ▸ Open report* |
 | Patch (`--patch`) | All decompiled source and text diffs as one unified diff, usable with `patch` or a diff viewer |
 
+## Native executable
+
+`jpackage` (part of the JDK) turns the jar into an application with its own launcher, icon and bundled Java
+runtime — no Java installation needed on the target machine.
+
+```bash
+mvn package                       # the shaded jar first
+mvn -Pinstaller package           # -> target/dist/jartree-compare (any platform)
+packaging/package.cmd             # Windows: adds a console launcher as well
+packaging/package.sh              # macOS / Linux
+```
+
+| Result | Contents |
+|---|---|
+| `target/dist/jartree-compare/jartree-compare.exe` | Starts the desktop interface |
+| `target/dist/jartree-compare/jartree-compare-cli.exe` | Same application attached to a console, for the command line (Windows script only) |
+| `target/dist/jartree-compare/runtime` | The bundled Java runtime (the image is about 160 MB) |
+
+Installers instead of a plain directory: `packaging\package.cmd msi` (needs the
+[WiX toolset](https://wixtoolset.org/)), `packaging/package.sh dmg`, `deb` or `rpm`, or
+`mvn -Pinstaller -Djpackage.type=msi package`. Build on the platform you target: both the shaded jar and the
+image contain platform specific binaries.
+
+The icon is generated from source, so it can be changed without a drawing tool:
+
+```bash
+java tools/IconGenerator.java     # writes src/main/resources/io/jartree/gui/icon-*.png and packaging/*.ico
+```
+
 ## Development
 
 ```bash
@@ -237,6 +267,8 @@ Source layout:
 | `io.jartree.decompile` | Vineflower integration (in-memory sources, no temporary files) |
 | `io.jartree.report` | Console, HTML, JSON and patch output |
 | `io.jartree.gui` | JavaFX interface |
+| `tools/` | Icon generator (single-file Java program) |
+| `packaging/` | jpackage scripts, icons and launcher settings |
 
 The tests build their own jars by compiling small classes in memory
 (`src/test/java/io/jartree/Fixtures.java`), so they need no fixtures on disk. `GuiSnapshot` (test sources)

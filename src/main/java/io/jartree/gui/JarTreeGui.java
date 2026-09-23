@@ -7,6 +7,7 @@ import java.util.logging.Logger;
 
 import javafx.application.Application;
 import javafx.scene.Scene;
+import javafx.scene.image.Image;
 import javafx.stage.Stage;
 
 /**
@@ -36,6 +37,9 @@ public final class JarTreeGui extends Application {
         Scene scene = new Scene(window, settings.getDouble("width", 1360), settings.getDouble("height", 860));
         scene.getStylesheets().add(JarTreeGui.class.getResource("app.css").toExternalForm());
         stage.setTitle("jartree-compare");
+        for (int size : new int[] {32, 64, 128, 256}) {
+            stage.getIcons().add(new Image(JarTreeGui.class.getResourceAsStream("icon-" + size + ".png")));
+        }
         stage.setScene(scene);
         stage.setMinWidth(900);
         stage.setMinHeight(560);
