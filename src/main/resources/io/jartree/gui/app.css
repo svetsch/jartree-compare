@@ -1,0 +1,379 @@
+/* jartree-compare GUI theme on top of Modena */
+
+.root {
+    -fx-font-size: 13px;
+    -jt-add: #1a7f37;
+    -jt-add-bg: #e6f6ea;
+    -jt-add-bg-strong: #c9ecd2;
+    -jt-del: #c0262d;
+    -jt-del-bg: #fdecec;
+    -jt-del-bg-strong: #f8d0d1;
+    -jt-hunk: #4b50c8;
+    -jt-hunk-bg: #eef0fd;
+    -jt-changed: #b35900;
+    -jt-rebuilt: #0b7a8a;
+    -jt-unchanged: #8a8a94;
+    -jt-muted: #6b6b76;
+    -jt-accent: #3b5bdb;
+    -jt-mono: "Consolas", "Cascadia Mono", "Menlo", "DejaVu Sans Mono", monospace;
+}
+
+.mono {
+    -fx-font-family: -jt-mono;
+}
+
+.muted {
+    -fx-text-fill: -jt-muted;
+}
+
+.bold {
+    -fx-font-weight: bold;
+}
+
+.error-text {
+    -fx-text-fill: -jt-del;
+}
+
+.placeholder {
+    -fx-text-fill: -jt-muted;
+    -fx-padding: 24;
+    -fx-wrap-text: true;
+    -fx-text-alignment: center;
+}
+
+.explanation {
+    -fx-text-fill: -jt-muted;
+    -fx-font-style: italic;
+}
+
+/* ------------------------------------------------------------------ top area */
+
+.input-form {
+    -fx-background-color: -fx-background;
+}
+
+.button.accent {
+    -fx-base: -jt-accent;
+    -fx-font-weight: bold;
+}
+
+.filter-bar {
+    -fx-background-color: derive(-fx-background, -3%);
+    -fx-border-color: derive(-fx-background, -12%);
+    -fx-border-width: 1 0 1 0;
+}
+
+.status-chip {
+    -fx-background-radius: 999;
+    -fx-border-radius: 999;
+    -fx-padding: 3 11 3 11;
+    -fx-background-color: -fx-outer-border, -fx-control-inner-background;
+    -fx-background-insets: 0, 1;
+    -fx-text-fill: -jt-muted;
+}
+
+.status-chip:selected {
+    -fx-text-fill: white;
+    -fx-font-weight: bold;
+}
+
+.chip-added:selected { -fx-background-color: -jt-add; }
+.chip-removed:selected { -fx-background-color: -jt-del; }
+.chip-changed:selected { -fx-background-color: -jt-changed; }
+.chip-rebuilt:selected { -fx-background-color: -jt-rebuilt; }
+.chip-unchanged:selected { -fx-background-color: -jt-unchanged; }
+.chip-error:selected { -fx-background-color: #8e1c22; }
+
+.status-bar {
+    -fx-background-color: derive(-fx-background, -4%);
+    -fx-border-color: derive(-fx-background, -12%);
+    -fx-border-width: 1 0 0 0;
+}
+
+.button.flat {
+    -fx-background-color: transparent;
+    -fx-text-fill: -jt-accent;
+    -fx-padding: 1 6 1 6;
+}
+
+/* ------------------------------------------------------------------ result tree */
+
+.result-tree .library-cell {
+    -fx-font-family: -jt-mono;
+    -fx-font-weight: bold;
+}
+
+.result-tree .group-cell {
+    -fx-text-fill: -jt-muted;
+    -fx-font-style: italic;
+}
+
+.result-tree .changes-cell {
+    -fx-text-fill: -jt-muted;
+}
+
+.result-tree .tree-table-row-cell:selected .changes-cell,
+.result-tree .tree-table-row-cell:selected .group-cell {
+    -fx-text-fill: -fx-selection-bar-text;
+}
+
+.dot {
+    -fx-min-width: 9;
+    -fx-min-height: 9;
+    -fx-max-width: 9;
+    -fx-max-height: 9;
+    -fx-background-radius: 5;
+    -fx-background-color: -jt-unchanged;
+}
+
+.dot.status-added, .dot.change-added { -fx-background-color: -jt-add; }
+.dot.status-removed, .dot.change-removed { -fx-background-color: -jt-del; }
+.dot.status-changed, .dot.change-modified { -fx-background-color: -jt-changed; }
+.dot.status-rebuilt { -fx-background-color: -jt-rebuilt; }
+.dot.status-error { -fx-background-color: #8e1c22; }
+.dot.noise { -fx-background-color: #c4c4cc; }
+
+.result-tree .tree-table-cell.status-added,
+.result-tree .tree-table-cell.change-added { -fx-text-fill: -jt-add; }
+.result-tree .tree-table-cell.status-removed,
+.result-tree .tree-table-cell.change-removed,
+.result-tree .tree-table-cell.status-error { -fx-text-fill: -jt-del; }
+.result-tree .tree-table-cell.status-changed,
+.result-tree .tree-table-cell.change-modified { -fx-text-fill: -jt-changed; }
+.result-tree .tree-table-cell.status-rebuilt { -fx-text-fill: -jt-rebuilt; }
+.result-tree .tree-table-cell.status-unchanged,
+.result-tree .tree-table-cell.noise { -fx-text-fill: -jt-unchanged; }
+.result-tree .tree-table-row-cell:selected .tree-table-cell { -fx-text-fill: -fx-selection-bar-text; }
+
+/* ------------------------------------------------------------------ details */
+
+.detail-title {
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+
+.badge {
+    -fx-text-fill: white;
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-padding: 2 8 2 8;
+    -fx-background-radius: 5;
+    -fx-background-color: -jt-unchanged;
+}
+
+.badge.status-added, .badge.change-added { -fx-background-color: -jt-add; }
+.badge.status-removed, .badge.change-removed, .badge.status-error { -fx-background-color: -jt-del; }
+.badge.status-changed, .badge.change-modified { -fx-background-color: -jt-changed; }
+.badge.status-rebuilt { -fx-background-color: -jt-rebuilt; }
+
+.tag, .tag-warn {
+    -fx-font-size: 11px;
+    -fx-padding: 1 7 1 7;
+    -fx-border-radius: 4;
+    -fx-border-color: derive(-fx-background, -18%);
+    -fx-text-fill: -jt-muted;
+}
+
+.tag-warn {
+    -fx-border-color: -jt-changed;
+    -fx-text-fill: -jt-changed;
+}
+
+.api-view .api-added { -fx-text-fill: -jt-add; }
+.api-view .api-removed { -fx-text-fill: -jt-del; }
+.api-view .api-changed { -fx-text-fill: -jt-changed; }
+
+/* ------------------------------------------------------------------ diffs */
+
+.diff-toolbar {
+    -fx-padding: 4 8 4 8;
+}
+
+.diff-stats {
+    -fx-text-fill: -jt-muted;
+    -fx-padding: 0 0 0 10;
+}
+
+.diff-list .list-cell,
+.diff-table .table-cell {
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+    -fx-padding: 0 6 0 6;
+    -fx-cell-size: 19px;
+    -fx-background-color: -fx-control-inner-background;
+    -fx-text-fill: -fx-text-inner-color;
+}
+
+.diff-list .list-cell .label {
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+}
+
+.diff-table .table-row-cell {
+    -fx-background-color: -fx-control-inner-background;
+    -fx-cell-size: 19px;
+}
+
+.diff-list .list-cell.diff-added,
+.diff-table .table-cell.diff-added { -fx-background-color: -jt-add-bg; }
+.diff-list .list-cell.diff-added .diff-text,
+.diff-table .table-cell.diff-added { -fx-text-fill: #0f5a26; }
+
+.diff-list .list-cell.diff-removed,
+.diff-table .table-cell.diff-removed { -fx-background-color: -jt-del-bg; }
+.diff-list .list-cell.diff-removed .diff-text,
+.diff-table .table-cell.diff-removed { -fx-text-fill: #8e1c22; }
+
+.diff-list .list-cell.diff-hunk,
+.diff-table .table-cell.diff-hunk { -fx-background-color: -jt-hunk-bg; }
+.diff-list .list-cell.diff-hunk .diff-text,
+.diff-table .table-cell.diff-hunk { -fx-text-fill: -jt-hunk; }
+
+.diff-list .list-cell.diff-header .diff-text { -fx-text-fill: -jt-muted; -fx-font-weight: bold; }
+.diff-list .list-cell.diff-note .diff-text { -fx-text-fill: -jt-muted; -fx-font-style: italic; }
+
+.diff-table .table-cell.diff-empty { -fx-background-color: derive(-fx-control-inner-background, -4%); }
+
+.diff-lineno {
+    -fx-text-fill: #9a9aa5;
+    -fx-alignment: center-right;
+}
+
+.diff-list .list-cell:selected { -fx-background-color: #dbe4ff; }
+.diff-list .list-cell.diff-added:selected { -fx-background-color: -jt-add-bg-strong; }
+.diff-list .list-cell.diff-removed:selected { -fx-background-color: -jt-del-bg-strong; }
+.diff-table .table-row-cell:selected .table-cell { -fx-background-color: #dbe4ff; -fx-text-fill: black; }
+
+/* ------------------------------------------------------------------ pointing at changes */
+
+/* the changed part of an edited line */
+.diff-added .diff-hl {
+    -fx-background-color: #9fe3b0;
+    -fx-background-radius: 2;
+    -fx-text-fill: #0b4a1e;
+}
+
+.diff-removed .diff-hl {
+    -fx-background-color: #f7b1b4;
+    -fx-background-radius: 2;
+    -fx-text-fill: #6e1217;
+}
+
+.diff-table .table-cell.diff-added .diff-text { -fx-text-fill: #0f5a26; }
+.diff-table .table-cell.diff-removed .diff-text { -fx-text-fill: #8e1c22; }
+.diff-table .table-cell .label {
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+}
+
+/* lines of the member selected in the tree or the member list */
+.diff-list .list-cell.diff-focus,
+.diff-table .table-cell.diff-focus {
+    -fx-border-color: transparent transparent transparent -jt-accent;
+    -fx-border-width: 0 0 0 4;
+}
+
+.diff-list .list-cell.diff-context.diff-focus {
+    -fx-background-color: #f3f5ff;
+}
+
+.members-scroll {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+.members-view {
+    -fx-padding: 2;
+}
+
+.member-row {
+    -fx-padding: 2 8 2 8;
+    -fx-background-radius: 4;
+    -fx-cursor: hand;
+    -fx-alignment: center-left;
+}
+
+.member-row:hover {
+    -fx-background-color: #eef1fb;
+}
+
+.member-row-focus,
+.member-row-focus:hover {
+    -fx-background-color: #dbe4ff;
+}
+
+.member-symbol {
+    -fx-font-family: -jt-mono;
+    -fx-font-weight: bold;
+    -fx-min-width: 12;
+}
+
+.member-symbol.change-added { -fx-text-fill: -jt-add; }
+.member-symbol.change-removed { -fx-text-fill: -jt-del; }
+.member-symbol.change-modified { -fx-text-fill: -jt-changed; }
+
+.result-tree .member-cell {
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+}
+
+.dot.small {
+    -fx-min-width: 6;
+    -fx-min-height: 6;
+    -fx-max-width: 6;
+    -fx-max-height: 6;
+}
+
+/* ------------------------------------------------------------------ notices */
+
+.notice {
+    -fx-border-width: 0 0 1 0;
+    -fx-border-color: derive(-fx-background, -12%);
+}
+
+.notice-warn {
+    -fx-background-color: #fff4d6;
+}
+
+.notice-info {
+    -fx-background-color: #e8eefe;
+}
+
+.notice-icon {
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+}
+
+.notice-warn .notice-icon { -fx-text-fill: -jt-changed; }
+.notice-info .notice-icon { -fx-text-fill: -jt-accent; }
+
+/* the displayed result is out of date */
+.button.accent.needs-run {
+    -fx-base: #d9730d;
+}
+
+/* ------------------------------------------------------------------ timings */
+
+.timing-bar .bar {
+    -fx-background-color: -jt-accent;
+    -fx-background-insets: 2;
+}
+
+/* ------------------------------------------------------------------ lines column */
+
+.result-tree .lines-added {
+    -fx-text-fill: -jt-add;
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+}
+
+.result-tree .lines-removed {
+    -fx-text-fill: -jt-del;
+    -fx-font-family: -jt-mono;
+    -fx-font-size: 12px;
+}
+
+.result-tree .tree-table-row-cell:selected .lines-added,
+.result-tree .tree-table-row-cell:selected .lines-removed {
+    -fx-text-fill: -fx-selection-bar-text;
+}

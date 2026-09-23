@@ -1,0 +1,3 @@
+#!/bin/sh
+# Launcher for jartree-compare; build first with: mvn package
+exec java ${JAVA_OPTS:--Xmx4g} -jar "$(dirname "$0")/target/jartree-compare.jar" "$@"
