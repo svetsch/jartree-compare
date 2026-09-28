@@ -622,7 +622,8 @@ final class ComparisonPane extends BorderPane {
     /**
      * The name of a path: the last name of the absolute, normalized path, so that "." or "lib/.." name the same
      * directory before and after a comparison; the path itself for a root such as "C:\"; and the last name of the
-     * text when it is not a valid path (yet).
+     * text when it is not a valid path (yet). Both / and \ separate names, so that a Windows path in a comparison
+     * saved on Windows is named the same elsewhere.
      */
     private static String lastName(String text) {
         String t = text == null ? "" : text.trim();
@@ -631,11 +632,16 @@ final class ComparisonPane extends BorderPane {
         }
         try {
             Path p = Path.of(t).toAbsolutePath().normalize();
-            return p.getFileName() == null ? p.toString() : p.getFileName().toString();
+            return p.getFileName() == null ? p.toString() : lastSegment(p.getFileName().toString());
         } catch (InvalidPathException e) {
-            String stripped = t.replaceAll("[/\\\\]+$", "");
-            return stripped.substring(Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf('\\')) + 1);
+            return lastSegment(t);
         }
+    }
+
+    /** The text after the last / or \, ignoring trailing ones. */
+    private static String lastSegment(String text) {
+        String stripped = text.replaceAll("[/\\\\]+$", "");
+        return stripped.substring(Math.max(stripped.lastIndexOf('/'), stripped.lastIndexOf('\\')) + 1);
     }
 
     private static String parentOf(Path path) {
