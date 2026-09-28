@@ -32,6 +32,8 @@ public final class ClassChange {
     Integer newMajor;
     Nature nature = Nature.NOT_DECOMPILED;
     TextSupport.DiffText sourceDiff = TextSupport.DiffText.NONE;
+    /** Gzip-compressed source diff with the whole class as context, or null. */
+    byte[] wholeSourceDiff;
     TextSupport.DiffText bytecodeDiff = TextSupport.DiffText.NONE;
     String decompileProblem;
 
@@ -88,6 +90,20 @@ public final class ClassChange {
 
     public TextSupport.DiffText sourceDiff() {
         return sourceDiff;
+    }
+
+    /**
+     * The decompiled source diff with the whole class as context, or null when there is none: for classes whose
+     * source did not change, for added and removed classes (their {@link #sourceDiff()} already shows the whole
+     * class), and for reports written by earlier versions.
+     */
+    public String wholeSourceDiff() {
+        return wholeSourceDiff == null ? null : TextSupport.decompress(wholeSourceDiff);
+    }
+
+    /** {@link #wholeSourceDiff()} as stored, gzip-compressed; do not modify. */
+    public byte[] wholeSourceDiffCompressed() {
+        return wholeSourceDiff;
     }
 
     public TextSupport.DiffText bytecodeDiff() {

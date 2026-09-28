@@ -7,6 +7,7 @@ import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -159,6 +160,10 @@ public final class JsonReport {
         }
         if (includeDiffs) {
             m.put("sourceDiff", cc.sourceDiff().text());
+            if (cc.wholeSourceDiffCompressed() != null) {
+                // the whole class is large and only wanted by the user interface: keep it compact
+                m.put("wholeSourceDiffGzip", Base64.getEncoder().encodeToString(cc.wholeSourceDiffCompressed()));
+            }
             m.put("bytecodeDiff", cc.bytecodeDiff().text());
         }
         return m;

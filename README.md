@@ -169,6 +169,11 @@ Diffs can be shown side by side:
 
 ![Side-by-side diff](docs/images/gui-side-by-side.png)
 
+**Whole class.** By default a source diff shows the changed lines with a few lines of context. *Whole class* in the
+diff toolbar (or W, or *View ▸ Whole class in source diff*) shows the complete decompiled class instead, unified or
+side by side, with the changes highlighted in place; ▲ / ▼ still step through the changes, and switching keeps
+the selected line in view. The choice is remembered like the diff mode.
+
 **Point at a change.** Clicking a member in the tree or in the *Changed members* list scrolls the source diff to
 it and marks its lines. ▲ / ▼ (or N / P) step through the changes of a diff, F7 / Shift+F7 through the changed
 classes of the whole result.
@@ -273,7 +278,7 @@ large trees.
 | Report | Contents |
 |---|---|
 | HTML (`--html`) | Self-contained page: summary, status filters, search, collapsible colored diffs |
-| JSON (`--json`) | Full result: libraries, classes, members, resources, diffs, limits, timings. Reopen it with `--gui report.json` or *File ▸ Open* |
+| JSON (`--json`) | Full result: libraries, classes, members, resources, diffs, limits, timings. Reopen it with `--gui report.json` or *File ▸ Open*. The source diff with the whole class, for the GUI's *Whole class* view, is stored gzip-compressed and base64-encoded in `wholeSourceDiffGzip` |
 | Patch (`--patch`) | All decompiled source and text diffs as one unified diff, usable with `patch` or a diff viewer |
 
 ## Native executable

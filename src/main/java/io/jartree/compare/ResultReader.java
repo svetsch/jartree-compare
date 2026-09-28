@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -102,6 +103,13 @@ public final class ResultReader {
         c.newMajor = m.get("newClassVersion") == null ? null : (int) number(m.get("newClassVersion"), 0);
         c.decompileProblem = (String) m.get("decompileProblem");
         c.sourceDiff = diffText((String) m.get("sourceDiff"), m.get("sourceLinesAdded"), m.get("sourceLinesRemoved"));
+        if (m.get("wholeSourceDiffGzip") instanceof String whole && !whole.isEmpty()) {
+            try {
+                c.wholeSourceDiff = Base64.getDecoder().decode(whole);
+            } catch (IllegalArgumentException e) {
+                // a damaged whole-class diff only costs that view
+            }
+        }
         c.bytecodeDiff = diffText((String) m.get("bytecodeDiff"), m.get("bytecodeLinesAdded"),
                 m.get("bytecodeLinesRemoved"));
         return c;

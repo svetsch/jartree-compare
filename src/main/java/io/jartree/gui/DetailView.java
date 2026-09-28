@@ -6,6 +6,7 @@ import java.util.Locale;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.geometry.Insets;
 import javafx.scene.Node;
@@ -45,9 +46,11 @@ import io.jartree.scan.LibraryRef;
 final class DetailView extends StackPane {
 
     private final ObjectProperty<DiffView.Mode> diffMode;
+    private final BooleanProperty wholeClass;
 
-    DetailView(ObjectProperty<DiffView.Mode> diffMode) {
+    DetailView(ObjectProperty<DiffView.Mode> diffMode, BooleanProperty wholeClass) {
         this.diffMode = diffMode;
+        this.wholeClass = wholeClass;
         getStyleClass().add("detail-view");
         show(null);
     }
@@ -186,7 +189,8 @@ final class DetailView extends StackPane {
         TabPane tabs = new TabPane();
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         String base = c.internalName().substring(c.internalName().lastIndexOf('/') + 1);
-        DiffView sourceView = new DiffView(c.sourceDiff(), base + ".java.diff", emptySourceMessage(c), diffMode);
+        DiffView sourceView = new DiffView(c.sourceDiff(), c.wholeSourceDiff(), "Whole class", base + ".java.diff",
+                emptySourceMessage(c), diffMode, wholeClass);
         Tab source = new Tab("Decompiled source", sourceView);
         Tab api = new Tab("API (" + (c.api().added().size() + c.api().removed().size() + c.api().changed().size()) + ")",
                 apiView(c));

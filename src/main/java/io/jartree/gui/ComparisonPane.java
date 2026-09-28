@@ -116,14 +116,14 @@ final class ComparisonPane extends BorderPane {
     /** Set while a comparison file is applied, so that its view settings do not become the defaults. */
     private boolean applyingFile;
 
-    ComparisonPane(Stage stage, Settings settings, ObjectProperty<DiffView.Mode> diffMode, Consumer<String> log,
-                   Runnable showLog) {
+    ComparisonPane(Stage stage, Settings settings, ObjectProperty<DiffView.Mode> diffMode, BooleanProperty wholeClass,
+                   Consumer<String> log, Runnable showLog) {
         this.stage = stage;
         this.settings = settings;
         this.diffMode = diffMode;
         this.log = log;
         this.showLog = showLog;
-        this.detail = new DetailView(diffMode);
+        this.detail = new DetailView(diffMode, wholeClass);
         this.split = new SplitPane(tree, detail);
 
         getStyleClass().add("comparison-pane");

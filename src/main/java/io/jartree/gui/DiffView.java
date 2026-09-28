@@ -7,8 +7,10 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 import javafx.application.Platform;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.beans.value.ChangeListener;
@@ -43,7 +45,8 @@ import io.jartree.compare.TextSupport;
 
 /**
  * Shows a unified diff either as a unified list or side by side, highlights the changed part of edited lines,
- * navigates between changes (buttons, N / P keys) and can reveal the lines of a changed member.
+ * navigates between changes (buttons, N / P keys) and can reveal the lines of a changed member. When the diff with
+ * the whole file as context is known, the view can switch between the changed lines and the whole file.
  */
 final class DiffView extends VBox {
 
@@ -61,11 +64,25 @@ final class DiffView extends VBox {
         }
     }
 
-    private final String text;
+    /** A parsed diff, in both presentations. */
+    private record Model(String text, List<DiffModel.Line> lines, List<DiffModel.Row> rows) {
+        static Model of(String text) {
+            List<DiffModel.Line> lines = DiffModel.parse(text);
+            return new Model(text, lines, DiffModel.sideBySide(lines));
+        }
+    }
+
     private final String suggestedFileName;
     private final StackPane body = new StackPane();
-    private final List<DiffModel.Line> lines;
-    private final List<DiffModel.Row> rows;
+    /** The changed lines with some context. */
+    private final Model changes;
+    /** The diff with the whole file as context, or null if not known. */
+    private final String wholeText;
+    private Model whole;
+    /** What is shown: {@link #changes} or {@link #whole}. */
+    private Model model;
+    private List<DiffModel.Line> lines;
+    private List<DiffModel.Row> rows;
     private final Label position = new Label();
     private ListView<DiffModel.Line> unified;
     private TableView<DiffModel.Row> sideBySide;
@@ -73,12 +90,23 @@ final class DiffView extends VBox {
     private Focus focus;
     private int currentChange = -1;
     private ChangeListener<Mode> modeListener;
+    private ChangeListener<Boolean> wholeListener;
 
     DiffView(TextSupport.DiffText diff, String suggestedFileName, String emptyMessage, ObjectProperty<Mode> mode) {
-        this.text = diff.text();
+        this(diff, null, null, suggestedFileName, emptyMessage, mode, null);
+    }
+
+    /**
+     * @param wholeText  the same diff with the whole file as context, or null
+     * @param wholeLabel what the whole file is called on the button that shows it, e.g. "Whole class"
+     * @param showWhole  whether the whole file is shown, shared by the views; may be null without {@code wholeText}
+     */
+    DiffView(TextSupport.DiffText diff, String wholeText, String wholeLabel, String suggestedFileName,
+             String emptyMessage, ObjectProperty<Mode> mode, BooleanProperty showWhole) {
         this.suggestedFileName = suggestedFileName;
-        this.lines = DiffModel.parse(text);
-        this.rows = DiffModel.sideBySide(lines);
+        this.changes = Model.of(diff.text());
+        this.wholeText = changes.lines().isEmpty() || wholeText == null || wholeText.isEmpty() ? null : wholeText;
+        useModel(this.wholeText != null && showWhole.get() ? whole() : changes);
         getStyleClass().add("diff-view");
 
         if (lines.isEmpty()) {
@@ -111,6 +139,22 @@ final class DiffView extends VBox {
         };
         mode.addListener(new WeakChangeListener<>(modeListener));
 
+        ToggleButton wholeButton = null;
+        if (this.wholeText != null) {
+            wholeButton = new ToggleButton(wholeLabel);
+            wholeButton.setTooltip(new Tooltip("Show the " + wholeLabel.toLowerCase(Locale.ROOT)
+                    + " instead of only the changed lines and their context (W)"));
+            wholeButton.setSelected(showWhole.get());
+            ToggleButton button = wholeButton;
+            wholeButton.setOnAction(e -> showWhole.set(button.isSelected()));
+            // weak for the same reason as the mode listener
+            wholeListener = (obs, o, n) -> {
+                button.setSelected(n);
+                showWhole(n);
+            };
+            showWhole.addListener(new WeakChangeListener<>(wholeListener));
+        }
+
         Button previous = new Button("▲");
         previous.setTooltip(new Tooltip("Previous change (P or Alt+Up)"));
         previous.setOnAction(e -> navigate(-1));
@@ -124,13 +168,18 @@ final class DiffView extends VBox {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         Button copy = new Button("Copy");
-        copy.setTooltip(new Tooltip("Copy the unified diff to the clipboard"));
-        copy.setOnAction(e -> copyToClipboard(text));
+        copy.setTooltip(new Tooltip("Copy the unified diff as shown to the clipboard"));
+        copy.setOnAction(e -> copyToClipboard(model.text()));
         Button save = new Button("Save…");
-        save.setTooltip(new Tooltip("Save the unified diff to a file"));
+        save.setTooltip(new Tooltip("Save the unified diff as shown to a file"));
         save.setOnAction(e -> save());
-        ToolBar bar = new ToolBar(unifiedButton, sideButton, stats, previous, next, position, spacer, copy, save);
+        ToolBar bar = new ToolBar(unifiedButton, sideButton);
+        if (wholeButton != null) {
+            bar.getItems().add(wholeButton);
+        }
+        bar.getItems().addAll(stats, previous, next, position, spacer, copy, save);
         bar.getStyleClass().add("diff-toolbar");
+        BooleanProperty toggleWhole = this.wholeText == null ? null : showWhole;
 
         addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             if (e.isControlDown() || e.isShortcutDown()) {
@@ -142,6 +191,9 @@ final class DiffView extends VBox {
             } else if (e.getCode() == KeyCode.P || e.isAltDown() && e.getCode() == KeyCode.UP) {
                 navigate(-1);
                 e.consume();
+            } else if (e.getCode() == KeyCode.W && !e.isAltDown() && toggleWhole != null) {
+                toggleWhole.set(!toggleWhole.get());
+                e.consume();
             }
         });
 
@@ -151,7 +203,105 @@ final class DiffView extends VBox {
     }
 
     boolean isEmpty() {
-        return lines.isEmpty();
+        return changes.lines().isEmpty();
+    }
+
+    // ------------------------------------------------------------------ changes / whole file
+
+    private Model whole() {
+        if (whole == null) {
+            whole = Model.of(wholeText);
+        }
+        return whole;
+    }
+
+    private void useModel(Model m) {
+        model = m;
+        lines = m.lines();
+        rows = m.rows();
+    }
+
+    /** Switches between the changed lines and the whole file, staying at the selected line. */
+    private void showWhole(boolean on) {
+        Model next = on && wholeText != null ? whole() : changes;
+        if (next == model) {
+            return;
+        }
+        DiffModel.Line anchor = selectedLine();
+        useModel(next);
+        if (unified != null) {
+            unified.setItems(FXCollections.observableList(lines));
+        }
+        if (sideBySide != null) {
+            sideBySide.setItems(FXCollections.observableList(rows));
+        }
+        int index = anchor == null ? -1 : indexAt(anchor);
+        currentChange = -1;
+        updatePosition();
+        if (index >= 0) {
+            Platform.runLater(() -> select(index));
+        } else if (focus != null) {
+            Platform.runLater(this::scrollToFocus);
+        }
+    }
+
+    /** The selected line; in side-by-side mode the line of the selected row that has a number on the new side. */
+    private DiffModel.Line selectedLine() {
+        int i = selectedIndex();
+        if (i < 0) {
+            return null;
+        }
+        if (currentMode == Mode.SIDE_BY_SIDE) {
+            DiffModel.Row r = rows.get(i);
+            return r.rightLine() != null ? r.rightLine() : r.leftLine();
+        }
+        return lines.get(i);
+    }
+
+    /**
+     * Index (in the current mode's list) of the given line of the other model, or of the first line after it when
+     * the line is not shown; -1 for lines without a place in the files (headers, notes).
+     */
+    private int indexAt(DiffModel.Line anchor) {
+        if (!(anchor.isChange() || anchor.kind() == DiffModel.Kind.CONTEXT)) {
+            return -1;
+        }
+        int size = currentMode == Mode.SIDE_BY_SIDE ? rows.size() : lines.size();
+        int last = -1;
+        for (int i = 0; i < size; i++) {
+            int newPos;
+            int oldPos;
+            boolean placed;
+            if (currentMode == Mode.SIDE_BY_SIDE) {
+                DiffModel.Row r = rows.get(i);
+                if (sameLine(r.leftLine(), anchor) || sameLine(r.rightLine(), anchor)) {
+                    return i;
+                }
+                newPos = r.newPos();
+                oldPos = r.oldPos();
+                placed = r.isChange() || r.leftKind() == DiffModel.Kind.CONTEXT;
+            } else {
+                DiffModel.Line l = lines.get(i);
+                if (sameLine(l, anchor)) {
+                    return i;
+                }
+                newPos = l.newPos();
+                oldPos = l.oldPos();
+                placed = l.isChange() || l.kind() == DiffModel.Kind.CONTEXT;
+            }
+            if (placed) {
+                if (newPos > anchor.newPos() || newPos == anchor.newPos() && oldPos > anchor.oldPos()) {
+                    return i;
+                }
+                last = i;
+            }
+        }
+        return last;
+    }
+
+    private static boolean sameLine(DiffModel.Line a, DiffModel.Line b) {
+        return a != null && a.kind() == b.kind() && Objects.equals(a.oldNo(), b.oldNo())
+                && Objects.equals(a.newNo(), b.newNo());
     }
 
     // ------------------------------------------------------------------ modes
@@ -162,6 +312,11 @@ final class DiffView extends VBox {
         }
         currentMode = m;
         body.getChildren().setAll(m == Mode.UNIFIED ? unified() : sideBySide());
+        // lay the new list out now: scrolling a list that has never been laid out misses the target
+        if (getScene() != null) {
+            body.applyCss();
+            body.layout();
+        }
         updatePosition();
         if (focus != null) {
             Platform.runLater(this::scrollToFocus);
@@ -496,7 +651,7 @@ final class DiffView extends VBox {
         File file = chooser.showSaveDialog(getScene().getWindow());
         if (file != null) {
             try {
-                Files.writeString(file.toPath(), text, StandardCharsets.UTF_8);
+                Files.writeString(file.toPath(), model.text(), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 Dialogs.error(getScene().getWindow(), "Could not save " + file, e);
             }

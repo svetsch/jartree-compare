@@ -38,8 +38,10 @@ import io.jartree.scan.ZipUtil;
  */
 public final class ResultCache {
 
-    /** Bump when the cached content or its interpretation changes. */
-    private static final String FORMAT = "3";
+    /** Bump when the cached library results or their interpretation change. */
+    private static final String LIBRARY_FORMAT = "4";
+    /** Bump when the cached decompiled sources or their interpretation change. */
+    private static final String SOURCE_FORMAT = "3";
     private static final String DECOMPILER = "vineflower-1.12.0";
 
     private final Path dir;
@@ -75,7 +77,7 @@ public final class ResultCache {
     // ------------------------------------------------------------------ library results
 
     static String libraryKey(LibraryRef oldLib, LibraryRef newLib, CompareOptions o) {
-        return hash(String.join("\n", FORMAT, DECOMPILER, oldLib.sha256(), newLib.sha256(), oldLib.path(),
+        return hash(String.join("\n", LIBRARY_FORMAT, DECOMPILER, oldLib.sha256(), newLib.sha256(), oldLib.path(),
                 newLib.path(), String.valueOf(o.nestedDepth()), String.join(",", o.extensions().stream().sorted().toList()),
                 String.join(",", o.packages().stream().sorted().toList()),
                 String.join(",", o.ignoredEntries().stream().sorted().toList()), String.valueOf(o.decompile()),
@@ -108,7 +110,7 @@ public final class ResultCache {
     /** Key of a class group: the class files (internal name and bytes) that are decompiled together. */
     static String sourceKey(Map<String, byte[]> files) {
         MessageDigest md = ZipUtil.digest();
-        md.update((FORMAT + "\n" + DECOMPILER + "\n").getBytes(StandardCharsets.UTF_8));
+        md.update((SOURCE_FORMAT + "\n" + DECOMPILER + "\n").getBytes(StandardCharsets.UTF_8));
         files.forEach((name, bytes) -> {
             md.update(name.getBytes(StandardCharsets.UTF_8));
             md.update((byte) 0);

@@ -406,11 +406,16 @@ final class LibraryComparator {
 
             long diffStart = System.nanoTime();
             String fileName = g.prefix + g.outer + ".java";
-            change.sourceDiff = TextSupport.unifiedDiff(
+            TextSupport.Diffs diffs = TextSupport.unifiedDiffs(
                     "a/" + diff.oldLib.path() + "!/" + fileName, "b/" + diff.newLib.path() + "!/" + fileName,
                     oldSource == null && g.oldFiles.isEmpty() ? null : nullToEmpty(oldSource),
                     newSource == null && g.newFiles.isEmpty() ? null : nullToEmpty(newSource),
                     options.contextLines(), options.maxDiffLines());
+            change.sourceDiff = diffs.diff();
+            // compressed: it holds the whole class, but is only looked at for a few classes
+            if (change.type() == ChangeType.MODIFIED && !diffs.whole().isEmpty()) {
+                change.wholeSourceDiff = TextSupport.compress(diffs.whole().text());
+            }
             change.members = SourceLocator.locate(change.members, oldSource, newSource);
             timings.since(Timings.Phase.DIFF, diffStart);
 

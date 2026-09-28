@@ -1,5 +1,11 @@
 package io.jartree.compare;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -9,6 +15,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 import com.github.difflib.DiffUtils;
 import com.github.difflib.UnifiedDiffUtils;
@@ -115,20 +123,46 @@ public final class TextSupport {
 
     public static DiffText unifiedDiff(String oldName, String newName, String oldText, String newText, int context,
                                        int maxLines) {
+        return diffs(oldName, newName, oldText, newText, context, maxLines, false).diff();
+    }
+
+    /**
+     * A unified diff of two texts, and the same diff with the whole file as context.
+     *
+     * @param diff  the diff with {@code context} lines around each change, cut after {@code maxLines}
+     * @param whole every line of both texts, never cut; {@link DiffText#NONE} when they are equal
+     */
+    public record Diffs(DiffText diff, DiffText whole) {
+    }
+
+    public static Diffs unifiedDiffs(String oldName, String newName, String oldText, String newText, int context,
+                                     int maxLines) {
+        return diffs(oldName, newName, oldText, newText, context, maxLines, true);
+    }
+
+    private static Diffs diffs(String oldName, String newName, String oldText, String newText, int context,
+                               int maxLines, boolean withWhole) {
         List<String> a = oldText == null ? List.of() : lines(oldText);
         List<String> b = newText == null ? List.of() : lines(newText);
         Patch<String> patch = DiffUtils.diff(a, b);
         if (patch.getDeltas().isEmpty()) {
-            return DiffText.NONE;
+            return new Diffs(DiffText.NONE, DiffText.NONE);
         }
+        String from = oldText == null ? "/dev/null" : oldName;
+        String to = newText == null ? "/dev/null" : newName;
+        return new Diffs(render(from, to, a, patch, context, maxLines),
+                withWhole ? render(from, to, a, patch, a.size() + b.size(), 0) : DiffText.NONE);
+    }
+
+    private static DiffText render(String oldName, String newName, List<String> a, Patch<String> patch, int context,
+                                   int maxLines) {
         int added = 0;
         int removed = 0;
         for (var delta : patch.getDeltas()) {
             added += delta.getTarget().size();
             removed += delta.getSource().size();
         }
-        List<String> out = UnifiedDiffUtils.generateUnifiedDiff(
-                oldText == null ? "/dev/null" : oldName, newText == null ? "/dev/null" : newName, a, patch, context);
+        List<String> out = UnifiedDiffUtils.generateUnifiedDiff(oldName, newName, a, patch, context);
         StringBuilder sb = new StringBuilder();
         int count = 0;
         for (String line : out) {
@@ -139,6 +173,25 @@ public final class TextSupport {
             sb.append(line).append('\n');
         }
         return new DiffText(sb.toString(), added, removed);
+    }
+
+    /** Gzip-compresses a text, to keep large texts that are rarely looked at small in memory. */
+    public static byte[] compress(String text) {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(Math.max(64, text.length() / 6));
+        try (OutputStream out = new GZIPOutputStream(bytes)) {
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return bytes.toByteArray();
+    }
+
+    public static String decompress(byte[] data) {
+        try (InputStream in = new GZIPInputStream(new ByteArrayInputStream(data))) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private static List<String> lines(String text) {

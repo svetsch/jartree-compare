@@ -191,6 +191,14 @@ class JarTreeCompareTest {
         assertTrue(diff.contains("multiply"), diff);
         assertTrue(diff.contains("<< 1"), "inner class change is part of the outer source: " + diff);
 
+        String whole = calc.wholeSourceDiff();
+        assertNotNull(whole, "modified classes keep the diff with the whole class");
+        assertTrue(whole.contains("\n@@ -1,"), "the whole class is one hunk from the first line: " + whole);
+        assertEquals(1, whole.lines().filter(l -> l.startsWith("@@")).count(), whole);
+        // after the --- / +++ header, every added and removed line appears exactly once
+        long wholeChanges = whole.lines().skip(2).filter(l -> l.startsWith("+") || l.startsWith("-")).count();
+        assertEquals(calc.sourceDiff().added() + calc.sourceDiff().removed(), wholeChanges, whole);
+
         assertTrue(calc.api().added().stream().anyMatch(m -> m.contains("long multiply(long, long)")), calc.api().toString());
         assertTrue(calc.api().changed().stream().anyMatch(m -> m.contains("\"calc\"") && m.contains("\"calculator\"")),
                 calc.api().toString());
@@ -424,6 +432,7 @@ class JarTreeCompareTest {
                 assertEquals(ca.api(), cb.api());
                 assertEquals(ca.members(), cb.members());
                 assertEquals(ca.sourceDiff(), cb.sourceDiff());
+                assertEquals(ca.wholeSourceDiff(), cb.wholeSourceDiff());
                 assertEquals(ca.bytecodeDiff(), cb.bytecodeDiff());
             }
             assertEquals(a.resources(), b.resources());

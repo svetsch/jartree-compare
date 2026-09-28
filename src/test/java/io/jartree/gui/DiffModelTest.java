@@ -7,6 +7,8 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 
+import io.jartree.compare.TextSupport;
+
 class DiffModelTest {
 
     private static final String DIFF = """
@@ -72,5 +74,24 @@ class DiffModelTest {
         assertEquals("total", "int count = total;".substring(word[0], word[1]));
         assertEquals("totalSize", "int count = totalSize;".substring(word[0], word[2]));
         assertEquals(null, DiffModel.changedRange("completely different", "nothing alike here"));
+    }
+
+    @Test
+    void wholeFileDiffKeepsEveryLine() {
+        String a = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten\n";
+        String b = a.replace("five", "FIVE");
+        TextSupport.Diffs diffs = TextSupport.unifiedDiffs("a/X", "b/X", a, b, 1, 0);
+        List<DiffModel.Line> changes = DiffModel.parse(diffs.diff().text());
+        List<DiffModel.Line> whole = DiffModel.parse(diffs.whole().text());
+        assertEquals(1 + 3 + 1, changes.stream().filter(l -> l.kind() != DiffModel.Kind.HEADER).count());
+        // hunk, 9 unchanged lines, one removed and one added
+        assertEquals(1 + 9 + 2, whole.stream().filter(l -> l.kind() != DiffModel.Kind.HEADER).count());
+        assertEquals(diffs.diff().added(), diffs.whole().added());
+        DiffModel.Line last = whole.get(whole.size() - 1);
+        assertEquals("ten", last.text());
+        assertEquals(10, last.oldNo());
+        assertEquals(10, last.newNo());
+        assertEquals(diffs.whole().text(), TextSupport.decompress(TextSupport.compress(diffs.whole().text())));
+        assertTrue(TextSupport.unifiedDiffs("a/X", "b/X", a, a, 3, 0).whole().isEmpty());
     }
 }

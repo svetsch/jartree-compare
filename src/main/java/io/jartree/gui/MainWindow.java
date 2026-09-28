@@ -13,7 +13,9 @@ import java.util.Optional;
 
 import javafx.application.HostServices;
 import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.beans.property.SimpleObjectProperty;
 import javafx.beans.value.ChangeListener;
 import javafx.scene.Scene;
@@ -69,6 +71,8 @@ final class MainWindow extends BorderPane {
     private final HostServices hostServices;
     private final Settings settings = new Settings();
     private final ObjectProperty<DiffView.Mode> diffMode = new SimpleObjectProperty<>(DiffView.Mode.UNIFIED);
+    /** Whether source diffs show the whole class rather than only the changed lines. */
+    private final BooleanProperty wholeClass = new SimpleBooleanProperty(false);
 
     private final TabPane tabs = new TabPane();
     private final Tab newTab = new Tab("+");
@@ -113,6 +117,8 @@ final class MainWindow extends BorderPane {
             diffMode.set(DiffView.Mode.UNIFIED);
         }
         diffMode.addListener((obs, o, n) -> settings.put("diffMode", n.name()));
+        wholeClass.set(settings.getBoolean("wholeClass", false));
+        wholeClass.addListener((obs, o, n) -> settings.putBoolean("wholeClass", n));
         installDragAndDrop();
         restoreTabs();
     }
@@ -121,7 +127,7 @@ final class MainWindow extends BorderPane {
 
     /** Opens a tab; with {@code paths} null it starts from the remembered defaults. */
     ComparisonPane addTab(String[] paths) {
-        ComparisonPane pane = new ComparisonPane(stage, settings, diffMode, this::log, this::showLog);
+        ComparisonPane pane = new ComparisonPane(stage, settings, diffMode, wholeClass, this::log, this::showLog);
         if (paths != null) {
             pane.setPaths(paths[0], paths[1]);
         }
@@ -293,6 +299,8 @@ final class MainWindow extends BorderPane {
         side.setOnAction(e -> diffMode.set(DiffView.Mode.SIDE_BY_SIDE));
         (diffMode.get() == DiffView.Mode.UNIFIED ? unified : side).setSelected(true);
         diffMode.addListener((obs, o, n) -> (n == DiffView.Mode.UNIFIED ? unified : side).setSelected(true));
+        CheckMenuItem whole = new CheckMenuItem("Whole class in source diff");
+        whole.selectedProperty().bindBidirectional(wholeClass);
         MenuItem timings = new MenuItem("Timings…");
         timings.setAccelerator(new KeyCodeCombination(KeyCode.T, KeyCombination.SHORTCUT_DOWN));
         timings.setOnAction(e -> showTimings());
@@ -319,7 +327,7 @@ final class MainWindow extends BorderPane {
         previousTab.setOnAction(e -> selectTab(-1));
         Menu view = new Menu("View", null, find, nextClass, previousClass, new SeparatorMenuItem(), sortByChanges,
                 unsorted, new SeparatorMenuItem(), expand, collapse, new SeparatorMenuItem(), columns, noise,
-                new SeparatorMenuItem(), unified, side, new SeparatorMenuItem(), nextTab, previousTab,
+                new SeparatorMenuItem(), unified, side, whole, new SeparatorMenuItem(), nextTab, previousTab,
                 new SeparatorMenuItem(), timings, showLog);
 
         MenuItem clearCache = new MenuItem("Clear cache…");
