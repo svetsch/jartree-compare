@@ -59,6 +59,19 @@ class DiffModelTest {
     }
 
     @Test
+    void extractsTheCodeOfOneSide() {
+        List<DiffModel.Line> lines = DiffModel.parse(DIFF);
+        assertEquals("keep\nold one\nold two\ntail\n", DiffModel.sideText(lines, false));
+        assertEquals("keep\nnew one\nnew two\nnew three\ntail\n", DiffModel.sideText(lines, true));
+
+        // side by side, the empty cell next to "new three" contributes nothing to the old side
+        List<DiffModel.Row> rows = DiffModel.sideBySide(lines).subList(3, 6);
+        assertEquals("old two\ntail\n", DiffModel.sideText(rows.stream().map(DiffModel.Row::leftLine).toList(), false));
+        assertEquals("new two\nnew three\ntail\n",
+                DiffModel.sideText(rows.stream().map(DiffModel.Row::rightLine).toList(), true));
+    }
+
+    @Test
     void highlightsTheChangedPartOfEditedLines() {
         List<DiffModel.Line> lines = DiffModel.parse("""
                 @@ -1,1 +1,1 @@

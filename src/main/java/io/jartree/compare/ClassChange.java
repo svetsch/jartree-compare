@@ -35,6 +35,8 @@ public final class ClassChange {
     /** Gzip-compressed source diff with the whole class as context, or null. */
     byte[] wholeSourceDiff;
     TextSupport.DiffText bytecodeDiff = TextSupport.DiffText.NONE;
+    PackedText oldSource;
+    PackedText newSource;
     String decompileProblem;
 
     ClassChange(String entryPrefix, String internalName, ChangeType type, List<String> changedFiles) {
@@ -108,6 +110,16 @@ public final class ClassChange {
 
     public TextSupport.DiffText bytecodeDiff() {
         return bytecodeDiff;
+    }
+
+    /** Full decompiled source of the old version; null when the class did not exist or no source diff was made. */
+    public PackedText oldSource() {
+        return oldSource;
+    }
+
+    /** Full decompiled source of the new version; null when the class does not exist or no source diff was made. */
+    public PackedText newSource() {
+        return newSource;
     }
 
     /** Non-null if Vineflower reported problems while decompiling this class. */

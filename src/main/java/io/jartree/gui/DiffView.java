@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import javafx.application.Platform;
 import javafx.beans.property.BooleanProperty;
@@ -18,10 +19,15 @@ import javafx.beans.value.WeakChangeListener;
 import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
 import javafx.scene.control.Button;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Control;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.MenuButton;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
+import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -41,16 +47,32 @@ import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 
 import io.jartree.bytecode.MemberChange;
+import io.jartree.compare.PackedText;
 import io.jartree.compare.TextSupport;
 
 /**
  * Shows a unified diff either as a unified list or side by side, highlights the changed part of edited lines,
- * navigates between changes (buttons, N / P keys) and can reveal the lines of a changed member. When the diff with
- * the whole file as context is known, the view can switch between the changed lines and the whole file.
+ * navigates between changes (buttons, N / P keys), can reveal the lines of a changed member, and copies or saves
+ * the selected lines, the diff or the whole old and new file. When the diff with the whole file as context is
+ * known, the view can switch between the changed lines and the whole file.
  */
 final class DiffView extends VBox {
 
     enum Mode { UNIFIED, SIDE_BY_SIDE }
+
+    /**
+     * The whole files the diff was made from.
+     *
+     * @param fileName name to save them under
+     * @param oldText  full old text, null when not available
+     * @param newText  full new text, null when not available
+     */
+    record Sources(String fileName, PackedText oldText, PackedText newText) {
+        static final Sources NONE = new Sources(null, null, null);
+    }
+
+    /** Directory of the last file saved from any diff, so that the old and new file land next to each other. */
+    private static File lastDirectory;
 
     /** Lines of the old or new file that belong to the member currently pointed at. */
     private record Focus(boolean newSide, int from, int to) {
@@ -73,6 +95,7 @@ final class DiffView extends VBox {
     }
 
     private final String suggestedFileName;
+    private final Sources sources;
     private final StackPane body = new StackPane();
     /** The changed lines with some context. */
     private final Model changes;
@@ -91,19 +114,24 @@ final class DiffView extends VBox {
     private int currentChange = -1;
     private ChangeListener<Mode> modeListener;
     private ChangeListener<Boolean> wholeListener;
+    /** Side of the side-by-side view last clicked; Ctrl+C copies the selected lines of that side. */
+    private boolean newSideClicked = true;
 
-    DiffView(TextSupport.DiffText diff, String suggestedFileName, String emptyMessage, ObjectProperty<Mode> mode) {
-        this(diff, null, null, suggestedFileName, emptyMessage, mode, null);
+    DiffView(TextSupport.DiffText diff, String suggestedFileName, Sources sources, String emptyMessage,
+             ObjectProperty<Mode> mode) {
+        this(diff, null, null, suggestedFileName, sources, emptyMessage, mode, null);
     }
 
     /**
      * @param wholeText  the same diff with the whole file as context, or null
      * @param wholeLabel what the whole file is called on the button that shows it, e.g. "Whole class"
+     * @param sources    the whole old and new file, for copying and saving
      * @param showWhole  whether the whole file is shown, shared by the views; may be null without {@code wholeText}
      */
     DiffView(TextSupport.DiffText diff, String wholeText, String wholeLabel, String suggestedFileName,
-             String emptyMessage, ObjectProperty<Mode> mode, BooleanProperty showWhole) {
+             Sources sources, String emptyMessage, ObjectProperty<Mode> mode, BooleanProperty showWhole) {
         this.suggestedFileName = suggestedFileName;
+        this.sources = sources;
         this.changes = Model.of(diff.text());
         this.wholeText = changes.lines().isEmpty() || wholeText == null || wholeText.isEmpty() ? null : wholeText;
         useModel(this.wholeText != null && showWhole.get() ? whole() : changes);
@@ -167,12 +195,16 @@ final class DiffView extends VBox {
         stats.getStyleClass().add("diff-stats");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Button copy = new Button("Copy");
-        copy.setTooltip(new Tooltip("Copy the unified diff as shown to the clipboard"));
-        copy.setOnAction(e -> copyToClipboard(model.text()));
-        Button save = new Button("Save…");
-        save.setTooltip(new Tooltip("Save the unified diff as shown to a file"));
-        save.setOnAction(e -> save());
+        MenuButton copy = new MenuButton("Copy");
+        copy.setTooltip(new Tooltip("Copy the selected old or new lines, the unified diff as shown or a whole file.\n"
+                + "Ctrl+C copies the selected lines of the side last clicked."));
+        copy.setOnShowing(e -> copy.getItems().setAll(copyItems()));
+        MenuButton save = new MenuButton("Save");
+        save.setTooltip(new Tooltip("Save the unified diff as shown or the whole old or new file"));
+        save.setOnShowing(e -> save.getItems().setAll(saveItems()));
+        // the items are built when the menu opens; a placeholder lets it open at all
+        copy.getItems().add(new MenuItem());
+        save.getItems().add(new MenuItem());
         ToolBar bar = new ToolBar(unifiedButton, sideButton);
         if (wholeButton != null) {
             bar.getItems().add(wholeButton);
@@ -182,6 +214,11 @@ final class DiffView extends VBox {
         BooleanProperty toggleWhole = this.wholeText == null ? null : showWhole;
 
         addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.isShortcutDown() && e.getCode() == KeyCode.C) {
+                copySelection();
+                e.consume();
+                return;
+            }
             if (e.isControlDown() || e.isShortcutDown()) {
                 return;
             }
@@ -330,7 +367,9 @@ final class DiffView extends VBox {
         if (unified == null) {
             unified = new ListView<>(FXCollections.observableList(lines));
             unified.getStyleClass().add("diff-list");
+            unified.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
             unified.setCellFactory(lv -> new UnifiedCell());
+            unified.setContextMenu(contextMenu());
         }
         return unified;
     }
@@ -340,6 +379,8 @@ final class DiffView extends VBox {
             sideBySide = new TableView<>(FXCollections.observableList(rows));
             sideBySide.getStyleClass().add("diff-table");
             sideBySide.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+            sideBySide.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+            sideBySide.setContextMenu(contextMenu());
             TableColumn<DiffModel.Row, DiffModel.Row> oldNo = column("", 48, true, true);
             TableColumn<DiffModel.Row, DiffModel.Row> oldText = column("Old", 420, true, false);
             TableColumn<DiffModel.Row, DiffModel.Row> newNo = column("", 48, false, true);
@@ -359,6 +400,10 @@ final class DiffView extends VBox {
         col.setCellValueFactory(cd -> new ReadOnlyObjectWrapper<>(cd.getValue()));
         col.setCellFactory(c -> new TableCell<>() {
             private final HighlightedText content = new HighlightedText();
+
+            {
+                setOnMousePressed(e -> newSideClicked = !left);
+            }
 
             @Override
             protected void updateItem(DiffModel.Row row, boolean empty) {
@@ -643,18 +688,160 @@ final class DiffView extends VBox {
         Clipboard.getSystemClipboard().setContent(content);
     }
 
-    private void save() {
-        FileChooser chooser = new FileChooser();
-        chooser.setTitle("Save diff");
-        chooser.setInitialFileName(suggestedFileName);
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Diff files", "*.diff", "*.patch"));
-        File file = chooser.showSaveDialog(getScene().getWindow());
-        if (file != null) {
-            try {
-                Files.writeString(file.toPath(), model.text(), StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                Dialogs.error(getScene().getWindow(), "Could not save " + file, e);
+    private List<MenuItem> copyItems() {
+        boolean selection = !selectedIndices().isEmpty();
+        return List.of(
+                item("Selected old lines", selection, () -> copyToClipboard(selectedText(false))),
+                item("Selected new lines", selection, () -> copyToClipboard(selectedText(true))),
+                new SeparatorMenuItem(),
+                item("Unified diff", true, () -> copyToClipboard(model.text())),
+                item("Whole old file", sources.oldText() != null, () -> copyFile(false)),
+                item("Whole new file", sources.newText() != null, () -> copyFile(true)));
+    }
+
+    private List<MenuItem> saveItems() {
+        return List.of(
+                item("Unified diff…", true, this::saveDiff),
+                item("Old file…", sources.oldText() != null, () -> saveFile(false)),
+                item("New file…", sources.newText() != null, () -> saveFile(true)));
+    }
+
+    private ContextMenu contextMenu() {
+        ContextMenu menu = new ContextMenu();
+        menu.setOnShowing(e -> {
+            boolean selection = !selectedIndices().isEmpty();
+            menu.getItems().setAll(
+                    item("Copy selected old lines", selection, () -> copyToClipboard(selectedText(false))),
+                    item("Copy selected new lines", selection, () -> copyToClipboard(selectedText(true))),
+                    new SeparatorMenuItem(),
+                    item("Copy whole old file", sources.oldText() != null, () -> copyFile(false)),
+                    item("Copy whole new file", sources.newText() != null, () -> copyFile(true)),
+                    item("Save old file…", sources.oldText() != null, () -> saveFile(false)),
+                    item("Save new file…", sources.newText() != null, () -> saveFile(true)));
+        });
+        menu.getItems().add(new MenuItem());
+        return menu;
+    }
+
+    private static MenuItem item(String label, boolean enabled, Runnable action) {
+        MenuItem item = new MenuItem(label);
+        item.setDisable(!enabled);
+        item.setOnAction(e -> action.run());
+        return item;
+    }
+
+    /** Ctrl+C: side by side, the selected lines of the side last clicked; unified, the lines as shown. */
+    private void copySelection() {
+        List<Integer> selected = selectedIndices();
+        if (selected.isEmpty()) {
+            return;
+        }
+        if (currentMode == Mode.SIDE_BY_SIDE) {
+            copyToClipboard(selectedText(newSideClicked));
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i : selected) {
+            DiffModel.Line line = lines.get(i);
+            String marker = switch (line.kind()) {
+                case ADDED -> "+";
+                case REMOVED -> "-";
+                case CONTEXT -> " ";
+                default -> "";
+            };
+            sb.append(marker).append(line.text()).append('\n');
+        }
+        copyToClipboard(sb.toString());
+    }
+
+    /** Selected indices of the current mode's list, in display order. */
+    private List<Integer> selectedIndices() {
+        Control control = currentMode == Mode.SIDE_BY_SIDE ? sideBySide : unified;
+        List<Integer> selected = new ArrayList<>();
+        if (control instanceof ListView<?> lv) {
+            selected.addAll(lv.getSelectionModel().getSelectedIndices());
+        } else if (control instanceof TableView<?> tv) {
+            selected.addAll(tv.getSelectionModel().getSelectedIndices());
+        }
+        selected.removeIf(i -> i == null || i < 0);
+        selected.sort(null);
+        return selected;
+    }
+
+    /** The code of one side in the selected lines or rows. */
+    private String selectedText(boolean newSide) {
+        List<DiffModel.Line> selected = new ArrayList<>();
+        for (int i : selectedIndices()) {
+            if (currentMode == Mode.SIDE_BY_SIDE) {
+                DiffModel.Row row = rows.get(i);
+                selected.add(newSide ? row.rightLine() : row.leftLine());
+            } else {
+                selected.add(lines.get(i));
             }
+        }
+        return DiffModel.sideText(selected, newSide);
+    }
+
+    private void copyFile(boolean newSide) {
+        String content = fileText(newSide);
+        if (content != null) {
+            copyToClipboard(content);
+        }
+    }
+
+    /** The whole old or new file, or null (after showing an error) when it cannot be restored. */
+    private String fileText(boolean newSide) {
+        PackedText packed = newSide ? sources.newText() : sources.oldText();
+        if (packed == null) {
+            return null;
+        }
+        try {
+            return packed.text();
+        } catch (RuntimeException e) {
+            Dialogs.error(getScene().getWindow(), "Could not restore the " + (newSide ? "new" : "old") + " file", e);
+            return null;
+        }
+    }
+
+    private void saveDiff() {
+        save("Save diff", suggestedFileName,
+                List.of(new FileChooser.ExtensionFilter("Diff files", "*.diff", "*.patch")), () -> model.text());
+    }
+
+    private void saveFile(boolean newSide) {
+        String name = sources.fileName();
+        int dot = name.lastIndexOf('.');
+        List<FileChooser.ExtensionFilter> filters = new ArrayList<>();
+        if (dot > 0 && dot < name.length() - 1) {
+            String ext = name.substring(dot + 1);
+            filters.add(new FileChooser.ExtensionFilter(ext.toUpperCase(Locale.ROOT) + " files", "*." + ext));
+        }
+        filters.add(new FileChooser.ExtensionFilter("All files", "*.*"));
+        save("Save " + (newSide ? "new" : "old") + " version of " + name, name, filters, () -> fileText(newSide));
+    }
+
+    private void save(String title, String fileName, List<FileChooser.ExtensionFilter> filters,
+                      Supplier<String> content) {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle(title);
+        chooser.setInitialFileName(fileName);
+        chooser.getExtensionFilters().addAll(filters);
+        if (lastDirectory != null && lastDirectory.isDirectory()) {
+            chooser.setInitialDirectory(lastDirectory);
+        }
+        File file = chooser.showSaveDialog(getScene().getWindow());
+        if (file == null) {
+            return;
+        }
+        lastDirectory = file.getParentFile();
+        String s = content.get();
+        if (s == null) {
+            return;
+        }
+        try {
+            Files.writeString(file.toPath(), s, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            Dialogs.error(getScene().getWindow(), "Could not save " + file, e);
         }
     }
 }

@@ -55,7 +55,7 @@ record ComparisonFile(String oldPath, String newPath, Map<String, Object> option
         }
         if (result != null) {
             root.put("appliedSettings", appliedSettings);
-            root.put("result", new JsonReport(true).toMap(result));
+            root.put("result", new JsonReport(true, true).toMap(result));
         }
         JsonReport.writeJson(root, file);
     }

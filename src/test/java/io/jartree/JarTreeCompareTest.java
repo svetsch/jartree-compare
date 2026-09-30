@@ -190,6 +190,10 @@ class JarTreeCompareTest {
         assertTrue(diff.contains("+") && diff.contains("IllegalArgumentException(\"negative\")"), diff);
         assertTrue(diff.contains("multiply"), diff);
         assertTrue(diff.contains("<< 1"), "inner class change is part of the outer source: " + diff);
+        String oldSource = calc.oldSource().text();
+        String newSource = calc.newSource().text();
+        assertTrue(oldSource.contains("class Calc") && !oldSource.contains("multiply"), oldSource);
+        assertTrue(newSource.contains("class Calc") && newSource.contains("multiply"), newSource);
 
         String whole = calc.wholeSourceDiff();
         assertNotNull(whole, "modified classes keep the diff with the whole class");
@@ -212,10 +216,14 @@ class JarTreeCompareTest {
         assertTrue(config.text());
         assertFalse(config.noise());
         assertTrue(config.diff().text().contains("+timeout=30"), config.diff().text());
+        assertEquals("timeout=10\nretries=3\n", config.oldText().text());
+        assertEquals("timeout=30\nretries=3\n", config.newText().text());
 
         ResourceChange logo = find(core, "logo.png");
         assertEquals(ChangeType.ADDED, logo.type());
         assertFalse(logo.text());
+        assertNull(logo.oldText());
+        assertNull(logo.newText(), "binary content is not kept");
 
         ResourceChange pom = find(core, "META-INF/maven/com.acme/core/pom.properties");
         assertFalse(pom.noise(), "version change in pom.properties is not noise");
@@ -411,7 +419,7 @@ class JarTreeCompareTest {
     @Test
     void jsonReportCanBeReadBack() throws IOException {
         Path json = tmp.resolve("roundtrip.json");
-        new JsonReport(true).write(result, json);
+        new JsonReport(true, true).write(result, json);
         ComparisonResult back = ResultReader.read(json);
 
         assertEquals(result.libraries().size(), back.libraries().size());
@@ -434,9 +442,20 @@ class JarTreeCompareTest {
                 assertEquals(ca.sourceDiff(), cb.sourceDiff());
                 assertEquals(ca.wholeSourceDiff(), cb.wholeSourceDiff());
                 assertEquals(ca.bytecodeDiff(), cb.bytecodeDiff());
+                assertEquals(ca.oldSource(), cb.oldSource());
+                assertEquals(ca.newSource(), cb.newSource());
             }
             assertEquals(a.resources(), b.resources());
         }
+
+        // a plain report has the diffs but leaves the full texts out
+        Path plain = tmp.resolve("plain.json");
+        new JsonReport(true).write(result, plain);
+        ResourceChange config = find(ResultReader.read(plain).libraries().stream()
+                .filter(l -> l.primary().path().equals("lib/core-1.1.jar")).findFirst().orElseThrow(), "config.properties");
+        assertTrue(config.diff().text().contains("+timeout=30"));
+        assertNull(config.oldText());
+        assertNull(config.newText());
     }
 
     @Test

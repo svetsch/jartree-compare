@@ -170,6 +170,20 @@ final class DiffModel {
         return Character.isLetterOrDigit(c) || c == '_' || c == '$';
     }
 
+    /**
+     * The code of one side among the given lines: context lines plus the removed (old side) or added (new side)
+     * lines, without markers. Hunk headers, notes and lines of the other side are left out.
+     */
+    static String sideText(List<Line> lines, boolean newSide) {
+        StringBuilder sb = new StringBuilder();
+        for (Line line : lines) {
+            if (line != null && (line.kind() == Kind.CONTEXT || line.kind() == (newSide ? Kind.ADDED : Kind.REMOVED))) {
+                sb.append(line.text()).append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
     /** Pairs removed and added blocks of each change next to each other. */
     static List<Row> sideBySide(List<Line> lines) {
         List<Row> rows = new ArrayList<>();

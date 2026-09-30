@@ -178,6 +178,14 @@ the selected line in view. The choice is remembered like the diff mode.
 it and marks its lines. ▲ / ▼ (or N / P) step through the changes of a diff, F7 / Shift+F7 through the changed
 classes of the whole result.
 
+**Copy and save code.** Select lines in a diff (Shift / Ctrl+click for several) and use *Copy* in the diff toolbar
+or the context menu to copy the selected old or new lines as plain code, without markers and without the other
+side's lines. Ctrl+C copies the selected lines of the side last clicked in the side-by-side view, or the lines as
+shown in the unified view. *Copy* and *Save* also take the unified diff or the whole old or new file (the full
+decompiled source of a class, or the full content of a text resource), not just the parts shown in the diff.
+Whole files are kept compressed in memory, in the cache and in `.jtcompare` files, up to 8 M characters each;
+JSON reports do not include them, so a result opened from a report offers the diff only.
+
 **Notices** below the filter bar report reached limits, patterns that matched nothing, and options that changed
 since the displayed result:
 

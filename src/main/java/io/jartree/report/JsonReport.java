@@ -18,6 +18,7 @@ import io.jartree.compare.ClassChange;
 import io.jartree.compare.ComparisonResult;
 import io.jartree.compare.LibraryDiff;
 import io.jartree.compare.Limits;
+import io.jartree.compare.PackedText;
 import io.jartree.compare.ResourceChange;
 import io.jartree.scan.LibraryRef;
 
@@ -25,9 +26,19 @@ import io.jartree.scan.LibraryRef;
 public final class JsonReport {
 
     private final boolean includeDiffs;
+    private final boolean includeFullTexts;
 
     public JsonReport(boolean includeDiffs) {
+        this(includeDiffs, false);
+    }
+
+    /**
+     * @param includeFullTexts also store the full old and new text of each diffed file (compressed), so that a
+     *                         result read back can still copy and save whole files
+     */
+    public JsonReport(boolean includeDiffs, boolean includeFullTexts) {
         this.includeDiffs = includeDiffs;
+        this.includeFullTexts = includeFullTexts;
     }
 
     public void write(ComparisonResult result, Path file) throws IOException {
@@ -87,11 +98,11 @@ public final class JsonReport {
         return root;
     }
 
-    /** Serializes a single library diff including all diffs (used by the result cache). */
+    /** Serializes a single library diff including all diffs and full texts (used by the result cache). */
     public static String toJson(LibraryDiff lib) {
         StringWriter w = new StringWriter();
         try {
-            writeValue(w, new JsonReport(true).library(lib), "");
+            writeValue(w, new JsonReport(true, true).library(lib), "");
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -166,6 +177,10 @@ public final class JsonReport {
             }
             m.put("bytecodeDiff", cc.bytecodeDiff().text());
         }
+        if (includeFullTexts) {
+            putPacked(m, "oldSource", cc.oldSource());
+            putPacked(m, "newSource", cc.newSource());
+        }
         return m;
     }
 
@@ -198,7 +213,18 @@ public final class JsonReport {
         if (includeDiffs && rc.text()) {
             m.put("diff", rc.diff().text());
         }
+        if (includeFullTexts) {
+            putPacked(m, "oldText", rc.oldText());
+            putPacked(m, "newText", rc.newText());
+        }
         return m;
+    }
+
+    /** Full texts are stored as base64 of their deflate-compressed UTF-8 bytes. */
+    private static void putPacked(Map<String, Object> m, String key, PackedText text) {
+        if (text != null) {
+            m.put(key, text.encoded());
+        }
     }
 
     private static void writeValue(Writer w, Object value, String indent) throws IOException {

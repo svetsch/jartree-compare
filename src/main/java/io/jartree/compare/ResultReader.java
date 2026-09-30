@@ -85,7 +85,8 @@ public final class ResultReader {
             diff.resources.add(new ResourceChange(str(r.get("path")), ChangeType.valueOf(str(r.get("type"))),
                     Boolean.TRUE.equals(r.get("text")), Boolean.TRUE.equals(r.get("noise")),
                     number(r.get("oldSize"), -1), number(r.get("newSize"), -1),
-                    diffText(text, r.get("linesAdded"), r.get("linesRemoved"))));
+                    diffText(text, r.get("linesAdded"), r.get("linesRemoved")),
+                    PackedText.decode((String) r.get("oldText")), PackedText.decode((String) r.get("newText"))));
         }
         return diff;
     }
@@ -112,6 +113,8 @@ public final class ResultReader {
         }
         c.bytecodeDiff = diffText((String) m.get("bytecodeDiff"), m.get("bytecodeLinesAdded"),
                 m.get("bytecodeLinesRemoved"));
+        c.oldSource = PackedText.decode((String) m.get("oldSource"));
+        c.newSource = PackedText.decode((String) m.get("newSource"));
         return c;
     }
 

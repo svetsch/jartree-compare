@@ -62,6 +62,8 @@ class ComparisonFileTest {
         assertEquals(result.libraries().size(), read.result().libraries().size());
         assertEquals(LibraryStatus.CHANGED, read.result().libraries().get(0).status());
         assertTrue(read.result().libraries().get(0).resources().get(0).diff().text().contains("+mode=new"));
+        assertEquals("mode=old\n", read.result().libraries().get(0).resources().get(0).oldText().text());
+        assertEquals("mode=new\n", read.result().libraries().get(0).resources().get(0).newText().text());
     }
 
     @Test

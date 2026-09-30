@@ -236,6 +236,8 @@ final class LibraryComparator {
             boolean text = (a == null || TextSupport.isText(a)) && (b == null || TextSupport.isText(b));
             boolean signature = TextSupport.isSignatureFile(path);
             TextSupport.DiffText textDiff = TextSupport.DiffText.NONE;
+            PackedText oldText = null;
+            PackedText newText = null;
             boolean noise = signature;
             if (text && !signature) {
                 String sa = a == null ? null : TextSupport.decode(a);
@@ -246,9 +248,13 @@ final class LibraryComparator {
                 textDiff = TextSupport.unifiedDiff(
                         "a/" + diff.oldLib.path() + "!/" + path, "b/" + diff.newLib.path() + "!/" + path,
                         sa, sb, options.contextLines(), options.maxDiffLines());
+                if (!textDiff.isEmpty()) {
+                    oldText = PackedText.of(sa);
+                    newText = PackedText.of(sb);
+                }
             }
             diff.resources.add(new ResourceChange(path, type, text, noise,
-                    a == null ? -1 : a.length, b == null ? -1 : b.length, textDiff));
+                    a == null ? -1 : a.length, b == null ? -1 : b.length, textDiff, oldText, newText));
         }
     }
 
@@ -415,6 +421,11 @@ final class LibraryComparator {
             // compressed: it holds the whole class, but is only looked at for a few classes
             if (change.type() == ChangeType.MODIFIED && !diffs.whole().isEmpty()) {
                 change.wholeSourceDiff = TextSupport.compress(diffs.whole().text());
+            }
+            if (!change.sourceDiff.isEmpty()) {
+                // kept for copying or saving the whole file; only worth it where there is a diff to show
+                change.oldSource = PackedText.of(oldSource);
+                change.newSource = PackedText.of(newSource);
             }
             change.members = SourceLocator.locate(change.members, oldSource, newSource);
             timings.since(Timings.Phase.DIFF, diffStart);

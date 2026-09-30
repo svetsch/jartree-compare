@@ -39,7 +39,7 @@ import io.jartree.scan.ZipUtil;
 public final class ResultCache {
 
     /** Bump when the cached library results or their interpretation change. */
-    private static final String LIBRARY_FORMAT = "4";
+    private static final String LIBRARY_FORMAT = "5";
     /** Bump when the cached decompiled sources or their interpretation change. */
     private static final String SOURCE_FORMAT = "3";
     private static final String DECOMPILER = "vineflower-1.12.0";
