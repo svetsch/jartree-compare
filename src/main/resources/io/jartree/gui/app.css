@@ -266,6 +266,13 @@
     -fx-font-size: 12px;
 }
 
+/* Java syntax; as specific as the added / removed text colors above, so that they win */
+.diff-view .label.diff-text.syn-keyword { -fx-text-fill: #0033b3; }
+.diff-view .label.diff-text.syn-string { -fx-text-fill: #067d17; }
+.diff-view .label.diff-text.syn-number { -fx-text-fill: #1750eb; }
+.diff-view .label.diff-text.syn-comment { -fx-text-fill: #7a7a85; -fx-font-style: italic; }
+.diff-view .label.diff-text.syn-annotation { -fx-text-fill: #8a7500; }
+
 /* lines of the member selected in the tree or the member list */
 .diff-list .list-cell.diff-focus,
 .diff-table .table-cell.diff-focus {

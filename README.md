@@ -160,8 +160,8 @@ every library, class and folder; *Collapse all* (Ctrl+Shift+C) folds the tree ba
 in the *View* menu and the tree's context menu.
 
 **Inspect a change.** The right pane shows library metadata, or for a class the decompiled source diff, its API
-changes, the bytecode diff and the changed class files. The part that actually changed inside an edited line is
-highlighted:
+changes, the bytecode diff and the changed class files. Java source is syntax colored, and the part that actually
+changed inside an edited line is highlighted:
 
 ![In-line highlight of the changed part of a line](docs/images/gui-inline-highlight.png)
 

@@ -5,9 +5,13 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
 
 import javafx.application.Platform;
@@ -18,6 +22,7 @@ import javafx.beans.value.ChangeListener;
 import javafx.beans.value.WeakChangeListener;
 import javafx.collections.FXCollections;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Control;
@@ -52,9 +57,9 @@ import io.jartree.compare.TextSupport;
 
 /**
  * Shows a unified diff either as a unified list or side by side, highlights the changed part of edited lines,
- * navigates between changes (buttons, N / P keys), can reveal the lines of a changed member, and copies or saves
- * the selected lines, the diff or the whole old and new file. When the diff with the whole file as context is
- * known, the view can switch between the changed lines and the whole file.
+ * colors Java syntax, navigates between changes (buttons, N / P keys), can reveal the lines of a changed member,
+ * and copies or saves the selected lines, the diff or the whole old and new file. When the diff with the whole file
+ * as context is known, the view can switch between the changed lines and the whole file.
  */
 final class DiffView extends VBox {
 
@@ -106,6 +111,15 @@ final class DiffView extends VBox {
     private Model model;
     private List<DiffModel.Line> lines;
     private List<DiffModel.Row> rows;
+    private final boolean javaSyntax;
+    /** Colored parts of each code line of the models shown so far; empty when the diff is not Java source. */
+    private final Map<DiffModel.Line, List<JavaSyntax.Span>> syntax = new IdentityHashMap<>();
+    /** Models whose lines are in {@link #syntax}. */
+    private final Set<Model> colored = Collections.newSetFromMap(new IdentityHashMap<>());
+    /** Start state of each line of the whole old and new file (null when unknown), once computed. */
+    private JavaSyntax.State[] oldStates;
+    private JavaSyntax.State[] newStates;
+    private boolean statesComputed;
     private final Label position = new Label();
     private ListView<DiffModel.Line> unified;
     private TableView<DiffModel.Row> sideBySide;
@@ -117,19 +131,23 @@ final class DiffView extends VBox {
     /** Side of the side-by-side view last clicked; Ctrl+C copies the selected lines of that side. */
     private boolean newSideClicked = true;
 
-    DiffView(TextSupport.DiffText diff, String suggestedFileName, Sources sources, String emptyMessage,
-             ObjectProperty<Mode> mode) {
-        this(diff, null, null, suggestedFileName, sources, emptyMessage, mode, null);
+    /** @param javaSyntax color the lines as Java source */
+    DiffView(TextSupport.DiffText diff, String suggestedFileName, Sources sources, boolean javaSyntax,
+             String emptyMessage, ObjectProperty<Mode> mode) {
+        this(diff, null, null, suggestedFileName, sources, javaSyntax, emptyMessage, mode, null);
     }
 
     /**
      * @param wholeText  the same diff with the whole file as context, or null
      * @param wholeLabel what the whole file is called on the button that shows it, e.g. "Whole class"
      * @param sources    the whole old and new file, for copying and saving
+     * @param javaSyntax color the lines as Java source
      * @param showWhole  whether the whole file is shown, shared by the views; may be null without {@code wholeText}
      */
     DiffView(TextSupport.DiffText diff, String wholeText, String wholeLabel, String suggestedFileName,
-             Sources sources, String emptyMessage, ObjectProperty<Mode> mode, BooleanProperty showWhole) {
+             Sources sources, boolean javaSyntax, String emptyMessage, ObjectProperty<Mode> mode,
+             BooleanProperty showWhole) {
+        this.javaSyntax = javaSyntax;
         this.suggestedFileName = suggestedFileName;
         this.sources = sources;
         this.changes = Model.of(diff.text());
@@ -253,6 +271,9 @@ final class DiffView extends VBox {
     }
 
     private void useModel(Model m) {
+        if (javaSyntax && colored.add(m)) {
+            colorSyntax(m.lines());
+        }
         model = m;
         lines = m.lines();
         rows = m.rows();
@@ -425,7 +446,7 @@ final class DiffView extends VBox {
                     setText(no == null ? "" : no.toString());
                     getStyleClass().add("diff-lineno");
                 } else if (line != null && kind != DiffModel.Kind.EMPTY) {
-                    content.show("", line);
+                    content.show("", line, syntax.get(line));
                     setGraphic(content);
                 }
             }
@@ -437,38 +458,133 @@ final class DiffView extends VBox {
         return "diff-" + kind.name().toLowerCase(Locale.ROOT).replace('_', '-');
     }
 
-    /** Text with the changed part of an edited line shown in a stronger color. */
+    /**
+     * Tokenizes the code lines. A line's start state (inside a block comment or text block or not) comes from the
+     * whole file when it is available, since a hunk may start inside a comment; otherwise it is carried from line
+     * to line within the diff, starting each hunk in code.
+     */
+    private void colorSyntax(List<DiffModel.Line> lines) {
+        if (!statesComputed) {
+            oldStates = lineStates(sources.oldText());
+            newStates = lineStates(sources.newText());
+            statesComputed = true;
+        }
+        JavaSyntax.State oldState = JavaSyntax.State.CODE;
+        JavaSyntax.State newState = JavaSyntax.State.CODE;
+        for (DiffModel.Line line : lines) {
+            switch (line.kind()) {
+                case HUNK -> {
+                    oldState = JavaSyntax.State.CODE;
+                    newState = JavaSyntax.State.CODE;
+                }
+                case CONTEXT, ADDED, REMOVED -> {
+                    boolean newSide = line.kind() != DiffModel.Kind.REMOVED;
+                    Integer no = newSide ? line.newNo() : line.oldNo();
+                    JavaSyntax.State[] states = newSide ? newStates : oldStates;
+                    JavaSyntax.State start = states != null && no != null && no >= 1 && no <= states.length
+                            ? states[no - 1] : newSide ? newState : oldState;
+                    JavaSyntax.Result result = JavaSyntax.highlight(line.text(), start);
+                    syntax.put(line, result.spans());
+                    if (line.kind() != DiffModel.Kind.ADDED) {
+                        oldState = result.end();
+                    }
+                    if (line.kind() != DiffModel.Kind.REMOVED) {
+                        newState = result.end();
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+    }
+
+    private static JavaSyntax.State[] lineStates(PackedText text) {
+        if (text == null) {
+            return null;
+        }
+        try {
+            return JavaSyntax.lineStates(text.text());
+        } catch (RuntimeException e) {
+            // an unreadable full text only costs the exact start states
+            return null;
+        }
+    }
+
+    /**
+     * Text of a line in pieces: syntax colored, with the changed part of an edited line shown in a stronger
+     * color on top. The labels are reused from one line to the next.
+     */
     private static final class HighlightedText extends HBox {
-        private final Label before = new Label();
+        private final List<Label> pool = new ArrayList<>();
         private final Label changed = new Label();
-        private final Label after = new Label();
+        private final List<Node> parts = new ArrayList<>();
+        private int used;
 
         HighlightedText() {
             super(0);
-            for (Label l : List.of(before, changed, after)) {
-                l.getStyleClass().add("diff-text");
-                l.setMinWidth(Region.USE_PREF_SIZE);
-            }
-            changed.getStyleClass().add("diff-hl");
-            getChildren().addAll(before, changed, after);
+            changed.getStyleClass().addAll("diff-text", "diff-hl");
+            changed.setMinWidth(Region.USE_PREF_SIZE);
             setMinWidth(Region.USE_PREF_SIZE);
         }
 
-        void show(String marker, DiffModel.Line line) {
+        /** @param spans colored parts of the line, or null to show it plainly */
+        void show(String marker, DiffModel.Line line, List<JavaSyntax.Span> spans) {
+            parts.clear();
+            used = 0;
             String t = line.text();
+            if (!marker.isEmpty()) {
+                piece(marker, null);
+            }
             boolean highlight = line.hlStart() >= 0 && line.hlEnd() > line.hlStart() && line.hlEnd() <= t.length();
             if (highlight) {
-                before.setText(marker + t.substring(0, line.hlStart()));
+                pieces(t, 0, line.hlStart(), spans);
                 changed.setText(t.substring(line.hlStart(), line.hlEnd()));
-                after.setText(t.substring(line.hlEnd()));
+                parts.add(changed);
+                pieces(t, line.hlEnd(), t.length(), spans);
             } else {
-                before.setText(marker + t);
-                changed.setText("");
-                after.setText("");
+                pieces(t, 0, t.length(), spans);
             }
-            changed.setVisible(highlight);
-            changed.setManaged(highlight);
-            after.setManaged(highlight);
+            getChildren().setAll(parts);
+        }
+
+        /** Adds the text from {@code from} to {@code to}, split where its color changes. */
+        private void pieces(String t, int from, int to, List<JavaSyntax.Span> spans) {
+            int pos = from;
+            if (spans != null) {
+                for (JavaSyntax.Span span : spans) {
+                    int start = Math.max(span.start(), pos);
+                    int end = Math.min(span.end(), to);
+                    if (start >= end) {
+                        continue;
+                    }
+                    if (start > pos) {
+                        piece(t.substring(pos, start), null);
+                    }
+                    piece(t.substring(start, end), span.style());
+                    pos = end;
+                }
+            }
+            if (pos < to) {
+                piece(t.substring(pos, to), null);
+            }
+        }
+
+        private void piece(String text, JavaSyntax.Style style) {
+            Label label;
+            if (used < pool.size()) {
+                label = pool.get(used);
+            } else {
+                label = new Label();
+                label.setMinWidth(Region.USE_PREF_SIZE);
+                pool.add(label);
+            }
+            used++;
+            label.setText(text);
+            label.getStyleClass().setAll("label", "diff-text");
+            if (style != null) {
+                label.getStyleClass().add("syn-" + style.name().toLowerCase(Locale.ROOT));
+            }
+            parts.add(label);
         }
     }
 
@@ -504,7 +620,7 @@ final class DiffView extends VBox {
                 case CONTEXT -> "  ";
                 default -> "";
             };
-            content.show(marker, line);
+            content.show(marker, line, syntax.get(line));
             getStyleClass().add(styleOf(line.kind()));
             if (focus != null && focus.contains(line)) {
                 getStyleClass().add("diff-focus");

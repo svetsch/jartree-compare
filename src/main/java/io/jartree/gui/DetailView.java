@@ -190,13 +190,13 @@ final class DetailView extends StackPane {
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
         String base = c.internalName().substring(c.internalName().lastIndexOf('/') + 1);
         DiffView sourceView = new DiffView(c.sourceDiff(), c.wholeSourceDiff(), "Whole class", base + ".java.diff",
-                new DiffView.Sources(base + ".java", c.oldSource(), c.newSource()), emptySourceMessage(c), diffMode,
-                wholeClass);
+                new DiffView.Sources(base + ".java", c.oldSource(), c.newSource()), true, emptySourceMessage(c),
+                diffMode, wholeClass);
         Tab source = new Tab("Decompiled source", sourceView);
         Tab api = new Tab("API (" + (c.api().added().size() + c.api().removed().size() + c.api().changed().size()) + ")",
                 apiView(c));
         Tab bytecode = new Tab("Bytecode", new DiffView(c.bytecodeDiff(), base + ".class.diff", DiffView.Sources.NONE,
-                "No bytecode diff was produced for this class (enable “Always include bytecode diff”).", diffMode));
+                false, "No bytecode diff was produced for this class (enable “Always include bytecode diff”).", diffMode));
         Tab files = new Tab("Files", filesView(c));
         tabs.getTabs().addAll(source, api, bytecode, files);
         if (c.sourceDiff().isEmpty() && !c.bytecodeDiff().isEmpty()) {
@@ -325,7 +325,7 @@ final class DetailView extends StackPane {
         String name = r.path().substring(r.path().lastIndexOf('/') + 1);
         Node body = r.text()
                 ? new DiffView(r.diff(), name + ".diff", new DiffView.Sources(name, r.oldText(), r.newText()),
-                        "No textual difference.", diffMode)
+                        name.endsWith(".java"), "No textual difference.", diffMode)
                 : placeholder("Binary content differs; no diff is available.");
         VBox box = new VBox(top, body);
         VBox.setVgrow(body, Priority.ALWAYS);
